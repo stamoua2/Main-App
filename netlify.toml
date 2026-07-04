@@ -1,0 +1,15 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  # PGlite ne sert qu'en local/tests; on ne l'inclut pas dans le bundle des fonctions.
+  external_node_modules = ["@electric-sql/pglite"]
+
+# SPA : toutes les routes non-API servent index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

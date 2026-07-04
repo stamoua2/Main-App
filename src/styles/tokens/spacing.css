@@ -1,0 +1,37 @@
+/* St-Amour du Vert — spacing, radius & layout tokens */
+:root {
+  --container-max: 1200px;
+  --container-max-narrow: 880px;   /* guarantee band */
+  --container-max-form: 1160px;    /* contact / soumission two-column */
+  --container-max-faq: 820px;
+
+  --container-pad: 32px;
+  --container-pad-mobile: 20px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 56px;
+  --space-12: 76px;
+
+  /* Section vertical rhythm (top/bottom padding as used across pages) */
+  --section-pad-y-sm: 42px;
+  --section-pad-y-lg: 65px;
+  --section-pad-y-xl: 76px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 18px;
+  --radius-4xl: 20px;
+  --radius-round: 50%;
+  --radius-pill: 999px;
+}

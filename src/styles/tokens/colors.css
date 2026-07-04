@@ -1,0 +1,82 @@
+/* St-Amour du Vert — color tokens
+   Source of truth: reference/site-source (stamoua2/stamourduvert-site), CLAUDE.md + inline styles.
+   Base hues first, semantic aliases below. */
+:root {
+  /* ---- Base greens ---- */
+  --green-forest: #174A2D;     /* primary — nav bg, headings, primary buttons */
+  --green-prairie: #2E8255;    /* secondary — hover states, accents, links */
+  --green-deep: #0F3A22;       /* footer background */
+  --green-hook: #163F28;       /* "hook" statement band background */
+  --green-mint: #8BE3A6;       /* light accent on dark green backgrounds */
+  --green-mint-soft: #A6E2BC;  /* eyebrow text on dark hook band */
+  --green-pale: #EAF1E6;       /* pale green section background (guarantee text, secteurs band) */
+  --green-pale-2: #F4F8F1;     /* secteurs marquee band background */
+  --green-pale-3: #F2F5EF;     /* nav dropdown hover background */
+  --green-pale-4: #F2F6EE;     /* package visits pill background */
+  --green-badge: #E8F0E4;      /* badge / checkmark chip background */
+  --green-line: #D9E4D2;       /* hairline on pale green backgrounds */
+  --green-ring: #DDE8D4;       /* package visits pill border */
+
+  /* Footer green text scale (on --green-deep) */
+  --green-footer-heading: #ffffff;
+  --green-footer-text: #B9CDB5;
+  --green-footer-text-dim: #9FBA9A;
+  --green-footer-text-dimmer: #A9C0A4;
+  --green-footer-label: #7FA37A;
+
+  /* ---- Terracotta accent ---- */
+  /* CLAUDE.md flags an old "#C8794A" as retired, but the live code actively
+     uses two close terracotta values — kept as-is, code is source of truth. */
+  --terracotta: #B5582E;         /* primary accent — popular badge, guarantee CTA, marquee dots */
+  --terracotta-review: #C25A2E;  /* footer "leave a review" button */
+  --terracotta-review-hover: #D26A3C;
+
+  /* ---- Neutrals / cream ---- */
+  --cream: #FAF8F3;         /* page background */
+  --cream-tips: #F3F1E8;    /* conseils page section background */
+  --cream-input: #FCFBF7;   /* form input fill */
+  --ink: #23271F;           /* body text */
+  --ink-2: #2A3326;         /* nav link text */
+  --ink-3: #3A4336;         /* form labels, package item text */
+  --ink-4: #3D453A;         /* long-form article body text */
+  --muted: #4A5247;         /* paragraph copy on cream */
+  --muted-2: #5B6157;       /* secondary/supporting copy */
+  --muted-3: #6a7a64;       /* inactive language toggle text */
+  --muted-4: #7A7E72;       /* fine-print notes */
+  --muted-5: #8A8E80;       /* address autocomplete secondary line */
+
+  --border: #ECE8DF;        /* header/footer hairline borders */
+  --border-2: #E7E3D8;      /* card borders */
+  --border-3: #E2DED3;      /* FAQ row divider */
+  --border-4: #DAD5C8;      /* form input border */
+  --border-5: #D8D3C5;      /* secondary button border */
+  --border-6: #ECE6D9;      /* package card internal divider */
+
+  --star: #F5B301;          /* google review star rating */
+
+  /* ---- Semantic aliases ---- */
+  --surface-page: var(--cream);
+  --surface-card: #ffffff;
+  --surface-header: #ffffff;
+  --surface-footer: var(--green-deep);
+  --surface-primary-band: var(--green-forest);
+  --surface-accent-band: var(--green-hook);
+
+  --text-body: var(--ink);
+  --text-heading: var(--green-forest);
+  --text-muted: var(--muted);
+  --text-muted-strong: var(--muted-2);
+  --text-on-dark: #ffffff;
+  --text-on-dark-muted: var(--green-footer-text);
+  --text-eyebrow: var(--green-prairie);
+
+  --action-primary-bg: var(--green-forest);
+  --action-primary-bg-hover: var(--green-prairie);
+  --action-primary-text: #ffffff;
+  --action-accent-bg: var(--terracotta);
+  --action-accent-text: #ffffff;
+
+  --border-default: var(--border-2);
+  --border-input: var(--border-4);
+  --border-focus: var(--green-prairie);
+}

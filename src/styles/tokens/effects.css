@@ -1,0 +1,40 @@
+/* St-Amour du Vert — shadow, border & motion tokens */
+:root {
+  /* Shadows: always a warm green-black tint, never pure black */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 10px 30px rgba(23, 74, 45, 0.09);
+  --shadow-card-hover: 0 16px 36px rgba(23, 74, 45, 0.10);
+  --shadow-card-hover-strong: 0 18px 44px rgba(23, 74, 45, 0.17);
+  --shadow-panel: 0 16px 44px rgba(23, 74, 45, 0.10);
+  --shadow-header-scrolled: 0 10px 30px rgba(23, 74, 45, 0.12);
+  --shadow-dropdown: 0 14px 34px rgba(23, 74, 45, 0.14);
+  --shadow-badge-float: 0 14px 40px rgba(23, 74, 45, 0.18);
+  --shadow-cta: 0 12px 34px rgba(0, 0, 0, 0.3);
+  --shadow-lightbox-img: 0 24px 70px rgba(0, 0, 0, 0.55);
+
+  --border-width: 1px;
+  --border-width-thick: 1.5px;
+  --border-width-emphasis: 2px;
+
+  /* Motion — soft, editorial. No bounce/spring anywhere in the source. */
+  --ease-reveal: cubic-bezier(0.22, 0.61, 0.36, 1); /* @kind other */
+  --duration-fast: 0.2s; /* @kind other */
+  --duration-base: 0.28s; /* @kind other */
+  --duration-reveal: 0.7s; /* @kind other */
+  --duration-kenburns: 22s; /* @kind other */
+  --duration-marquee: 30s; /* @kind other */
+
+  /* Hover/press conventions (documented, not enforced by tokens):
+     - Links/buttons: background swaps to --green-prairie (darker→lighter) or
+       filter:brightness(1.08) on accent-colored CTAs.
+     - Cards: translateY(-4px) + shadow bump + border-color → --green-prairie.
+     - No active/press-specific scale or shadow-inset anywhere in the source. */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.001s; /* @kind other */
+    --duration-base: 0.001s; /* @kind other */
+    --duration-reveal: 0.001s; /* @kind other */
+  }
+}

@@ -1,0 +1,43 @@
+/* St-Amour du Vert — typography tokens
+   Fonts loaded from Google Fonts (matches the live site exactly — see CLAUDE.md
+   and every page <helmet>). No self-hosted files needed. */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif; /* headings */
+  --font-body: 'Hanken Grotesk', system-ui, sans-serif;                        /* body copy, UI */
+
+  /* Weights actually used */
+  --weight-display-medium: 500;
+  --weight-display-semibold: 600;
+  --weight-display-bold: 700;
+  --weight-body-regular: 400;
+  --weight-body-medium: 500;
+  --weight-body-semibold: 600;
+  --weight-body-bold: 700;
+
+  /* Type scale — literal clamp()/px values pulled from the live pages */
+  --text-hero: clamp(38px, 5vw, 60px);        /* index hero H1 */
+  --text-h1: clamp(32px, 4.5vw, 50px);         /* page H1 (soumission, contact) */
+  --text-h1-wide: clamp(34px, 4.5vw, 52px);    /* réalisations / conseils H1 */
+  --text-h2: clamp(30px, 4vw, 44px);           /* section H2 (services, forfaits) */
+  --text-h2-lg: clamp(30px, 4vw, 46px);        /* guarantee H2 */
+  --text-h3: 24px;                             /* package card name */
+  --text-h3-sm: 20px;                          /* service card title / tip title 21px */
+  --text-body-lg: 18px;                        /* hero sub, réalisations sub */
+  --text-body-md: 17px;                        /* section sub copy */
+  --text-body: 15px;                           /* card copy, nav links */
+  --text-small: 14px;                          /* footer links, badges */
+  --text-tiny: 13px;                           /* labels, top bar */
+  --text-eyebrow: 13px;                        /* uppercase eyebrow label */
+
+  --tracking-eyebrow: 0.13em;
+  --tracking-label: 0.1em;
+  --tracking-tight: -0.02em;
+
+  --leading-tight: 1.05;
+  --leading-snug: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+  --leading-loose: 1.72;
+}
