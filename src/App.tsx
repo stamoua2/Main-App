@@ -11,14 +11,18 @@ import Documents from "./pages/Documents";
 import NouveauDocument from "./pages/NouveauDocument";
 import DetailDocument from "./pages/DetailDocument";
 import Parametres from "./pages/Parametres";
+import Calendrier from "./pages/Calendrier";
+import Soumissions from "./pages/Soumissions";
 
 const NAV = [
   { to: "/", label: "Tableau de bord", num: "01" },
   { to: "/clients", label: "Clients", num: "02" },
   { to: "/forfaits", label: "Forfaits", num: "03" },
   { to: "/superficie", label: "Superficie", num: "04" },
-  { to: "/documents", label: "Estimations & factures", num: "05" },
-  { to: "/parametres", label: "Paramètres", num: "06" },
+  { to: "/calendrier", label: "Calendrier & routes", num: "05" },
+  { to: "/soumissions", label: "Soumissions web", num: "06" },
+  { to: "/documents", label: "Estimations & factures", num: "07" },
+  { to: "/parametres", label: "Paramètres", num: "08" },
 ];
 
 export default function App() {
@@ -79,6 +83,8 @@ export default function App() {
           <Route path="/clients/:id" element={<FicheClient />} />
           <Route path="/forfaits" element={<Forfaits />} />
           <Route path="/superficie" element={<Superficie />} />
+          <Route path="/calendrier" element={<Calendrier />} />
+          <Route path="/soumissions" element={<Soumissions />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/nouveau" element={<NouveauDocument />} />
           <Route path="/documents/:id" element={<DetailDocument />} />

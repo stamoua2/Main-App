@@ -208,6 +208,21 @@ export const DDL: string[] = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
 
+  // ---- Passe 2 : ajouts (idempotents) ----
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS square_location_id TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS base_address TEXT NOT NULL DEFAULT '33, chemin du Graphite, L''Ange-Gardien (Québec) J8L 3J6'`,
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS base_latitude DOUBLE PRECISION`,
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS base_longitude DOUBLE PRECISION`,
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS square_public_url TEXT`,
+
+  // Journal des événements webhook Square (idempotence).
+  `CREATE TABLE IF NOT EXISTS square_events (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '',
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+
   `CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id)`,
   `CREATE INDEX IF NOT EXISTS idx_document_lines_doc ON document_lines(document_id)`,

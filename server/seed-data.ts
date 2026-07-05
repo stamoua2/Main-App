@@ -76,16 +76,48 @@ export const SEED_ALEX = {
   name: "Alex St-Amour",
 };
 
-// Adresse réelle de la région : hôtel de ville de L'Ange-Gardien (Outaouais).
-export const SEED_TEST_CLIENT = {
-  first_name: "Denis",
-  last_name: "Ouellet",
-  email: "denis.ouellet@example.com",
-  phone: "819-555-0142",
-  address_line: "1177, route 315",
-  city: "L'Ange-Gardien",
-  province: "QC",
-  postal_code: "J8L 0G1",
-  status: "actif",
-  notes: "Client de démonstration créé par la donnée de départ.",
-};
+// Clients test avec adresses réelles de la région (L'Ange-Gardien / Gatineau).
+export const SEED_TEST_CLIENTS = [
+  {
+    first_name: "Denis",
+    last_name: "Ouellet",
+    email: "denis.ouellet@example.com",
+    phone: "819-555-0142",
+    address_line: "1177, route 315",
+    city: "L'Ange-Gardien",
+    province: "QC",
+    postal_code: "J8L 0G1",
+    status: "actif",
+    notes: "Client de démonstration créé par la donnée de départ.",
+    package_slug: "essentiel",
+  },
+  {
+    first_name: "Marie",
+    last_name: "Lacroix",
+    email: "marie.lacroix@example.com",
+    phone: "819-555-0166",
+    address_line: "390, avenue de Buckingham",
+    city: "Gatineau (Buckingham)",
+    province: "QC",
+    postal_code: "J8L 2G7",
+    status: "actif",
+    notes: "Client de démonstration — secteur Buckingham.",
+    package_slug: "regulier",
+  },
+  {
+    first_name: "Paul",
+    last_name: "Séguin",
+    email: "paul.seguin@example.com",
+    phone: "819-555-0188",
+    address_line: "57, chemin de Montréal Ouest",
+    city: "Gatineau (Masson-Angers)",
+    province: "QC",
+    postal_code: "J8M 1K3",
+    status: "actif",
+    notes: "Client de démonstration — secteur Masson-Angers.",
+    package_slug: "elite",
+  },
+] as const;
+
+// Rétrocompatibilité (tests passe 1)
+export const SEED_TEST_CLIENT = SEED_TEST_CLIENTS[0];

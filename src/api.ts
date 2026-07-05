@@ -97,7 +97,68 @@ export interface DocumentFacturation {
   balanceCents: number;
   notes: string;
   convertedFromId: number | null;
+  squareInvoiceId: string | null;
+  squarePaymentStatus: string | null;
+  squarePublicUrl: string | null;
   lines?: LigneDocument[];
+}
+
+export interface Prospect {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string;
+  address: string;
+  sector: string;
+  message: string;
+  status: string;
+  clientId: number | null;
+  createdAt: string;
+}
+
+export interface NotificationApp {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  link: string;
+  read: boolean;
+  created_at: string;
+}
+
+export interface Visite {
+  id: number;
+  clientId: number;
+  clientName?: string;
+  addressLine?: string;
+  city?: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  services: string;
+  status: string;
+  routePosition: number | null;
+  notes: string;
+}
+
+export interface ArretRoute {
+  arret: number;
+  visiteId: number;
+  client: string;
+  adresse: string;
+}
+
+export interface PlanRoute {
+  date: string;
+  depot: { adresse: string; lat: number; lng: number };
+  optimise: {
+    ordre: ArretRoute[];
+    distanceMetres: number;
+    dureeSecondes: number;
+    segments: { distanceMeters: number; durationSeconds: number }[];
+  };
+  naif: { ordre: ArretRoute[]; distanceMetres: number; dureeSecondes: number };
+  gainMetres: number;
+  gainSecondes: number;
 }
 
 export interface Parametres {

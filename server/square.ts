@@ -1,0 +1,358 @@
+// Intégration Square (compte de PRODUCTION).
+// Flux sortant : facture de l'app → client + commande + facture Square publiée.
+// Flux entrant : webhook `invoice.*` (signature HMAC vérifiée) ou
+// synchronisation manuelle → statut « payée » dans l'app.
+//
+// IMPORTANT (PRD) : les tests utilisent des factures au nom personnel d'Alex
+// ou de Cindy — jamais les vrais clients.
+
+import { createHmac, randomUUID } from "node:crypto";
+import { getDb, type Db } from "./db.js";
+
+const SQUARE_BASE = "https://connect.squareup.com";
+const SQUARE_VERSION = "2025-01-23";
+
+let fetchImpl: typeof fetch = (...args) => fetch(...args);
+
+/** Tests : remplace fetch par une implémentation simulée. */
+export function setSquareFetchForTests(impl: typeof fetch | null): void {
+  fetchImpl = impl ?? ((...args) => fetch(...args));
+}
+
+export class SquareError extends Error {
+  status: number;
+  details: unknown;
+  constructor(message: string, status: number, details: unknown) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+async function squareFetch<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const token = process.env.SQUARE_ACCESS_TOKEN;
+  if (!token) {
+    throw new SquareError("SQUARE_ACCESS_TOKEN non configuré.", 503, null);
+  }
+  const res = await fetchImpl(`${SQUARE_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Square-Version": SQUARE_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { errors?: { detail?: string; code?: string }[] };
+  if (!res.ok) {
+    const detail = data.errors?.[0]?.detail ?? data.errors?.[0]?.code ?? `HTTP ${res.status}`;
+    throw new SquareError(`Erreur Square : ${detail}`, res.status, data.errors ?? data);
+  }
+  return data;
+}
+
+// ---------- Emplacement ----------
+
+export async function getSquareLocationId(db: Db): Promise<string> {
+  const { rows } = await db.query<{ square_location_id: string }>(
+    "SELECT square_location_id FROM settings WHERE id = 1",
+  );
+  if (rows[0]?.square_location_id) return rows[0].square_location_id;
+  const data = await squareFetch<{
+    locations: { id: string; status: string; currency: string }[];
+  }>("/v2/locations", "GET");
+  const location =
+    data.locations.find((l) => l.status === "ACTIVE" && l.currency === "CAD") ??
+    data.locations[0];
+  if (!location) throw new SquareError("Aucun emplacement Square trouvé.", 500, data);
+  await db.query("UPDATE settings SET square_location_id = $1, updated_at = now() WHERE id = 1", [
+    location.id,
+  ]);
+  return location.id;
+}
+
+// ---------- Envoi d'une facture vers Square ----------
+
+interface SquareInvoice {
+  id: string;
+  version: number;
+  status: string;
+  invoice_number?: string;
+  public_url?: string;
+  order_id?: string;
+  payment_requests?: { computed_amount_money?: { amount: number } }[];
+}
+
+interface PushResult {
+  squareInvoiceId: string;
+  status: string;
+  publicUrl: string | null;
+  squareCustomerId: string;
+  squareOrderId: string;
+  squareTotal: number | null;
+}
+
+/** 0.09975 → « 9.975 » (sans artefact de virgule flottante). */
+function ratePct(rate: string | number): string {
+  return (Number(rate) * 100).toFixed(4).replace(/\.?0+$/, "");
+}
+
+function isoDatePlusDays(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function pushDocumentToSquare(documentId: number): Promise<PushResult> {
+  const db = await getDb();
+  const { rows: docs } = await db.query<{
+    id: number;
+    kind: string;
+    number: string;
+    client_id: number;
+    taxes_enabled: boolean;
+    tps_rate: string;
+    tvq_rate: string;
+    deposit_cents: number;
+    square_invoice_id: string | null;
+  }>("SELECT * FROM documents WHERE id = $1", [documentId]);
+  const doc = docs[0];
+  if (!doc) throw new SquareError("Document introuvable.", 404, null);
+  if (doc.kind !== "facture") {
+    throw new SquareError("Seule une facture peut être envoyée vers Square (convertissez l'estimation d'abord).", 400, null);
+  }
+  if (doc.square_invoice_id) {
+    throw new SquareError(`Cette facture est déjà dans Square (${doc.square_invoice_id}).`, 409, null);
+  }
+
+  const { rows: clients } = await db.query<{
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone: string;
+    square_customer_id: string | null;
+  }>("SELECT * FROM clients WHERE id = $1", [doc.client_id]);
+  const client = clients[0];
+
+  const { rows: lines } = await db.query<{
+    description: string;
+    quantity: string;
+    unit_price_cents: number;
+  }>("SELECT * FROM document_lines WHERE document_id = $1 ORDER BY position", [documentId]);
+
+  const locationId = await getSquareLocationId(db);
+
+  // 1) Client Square (réutilisé si déjà créé)
+  let customerId = client.square_customer_id;
+  if (!customerId) {
+    const created = await squareFetch<{ customer: { id: string } }>("/v2/customers", "POST", {
+      idempotency_key: randomUUID(),
+      given_name: client.first_name,
+      family_name: client.last_name,
+      ...(client.email ? { email_address: client.email } : {}),
+      ...(client.phone ? { phone_number: client.phone } : {}),
+      note: "Créé par le Gestionnaire St-Amour du Vert",
+    });
+    customerId = created.customer.id;
+    await db.query("UPDATE clients SET square_customer_id = $1, updated_at = now() WHERE id = $2", [
+      customerId,
+      client.id,
+    ]);
+  }
+
+  // 2) Commande (lignes + taxes en pourcentage si activées)
+  const order = await squareFetch<{ order: { id: string; total_money?: { amount: number } } }>(
+    "/v2/orders",
+    "POST",
+    {
+      idempotency_key: randomUUID(),
+      order: {
+        location_id: locationId,
+        reference_id: doc.number,
+        customer_id: customerId,
+        line_items: lines.map((l) => ({
+          name: l.description.slice(0, 512),
+          quantity: String(Number(l.quantity)),
+          base_price_money: { amount: l.unit_price_cents, currency: "CAD" },
+        })),
+        ...(doc.taxes_enabled
+          ? {
+              taxes: [
+                { name: "TPS", percentage: ratePct(doc.tps_rate), scope: "ORDER" },
+                { name: "TVQ", percentage: ratePct(doc.tvq_rate), scope: "ORDER" },
+              ],
+            }
+          : {}),
+      },
+    },
+  );
+
+  // 3) Facture Square (SHARE_MANUALLY : aucun courriel envoyé par Square)
+  const paymentRequests: unknown[] = [];
+  if (doc.deposit_cents > 0) {
+    paymentRequests.push({
+      request_type: "DEPOSIT",
+      due_date: isoDatePlusDays(7),
+      fixed_amount_requested_money: { amount: doc.deposit_cents, currency: "CAD" },
+    });
+  }
+  paymentRequests.push({ request_type: "BALANCE", due_date: isoDatePlusDays(30) });
+
+  const created = await squareFetch<{ invoice: SquareInvoice }>("/v2/invoices", "POST", {
+    idempotency_key: randomUUID(),
+    invoice: {
+      location_id: locationId,
+      order_id: order.order.id,
+      primary_recipient: { customer_id: customerId },
+      payment_requests: paymentRequests,
+      delivery_method: "SHARE_MANUALLY",
+      invoice_number: doc.number,
+      title: "St-Amour du Vert — Entretien de pelouse",
+      accepted_payment_methods: { card: true },
+    },
+  });
+
+  // 4) Publication
+  const published = await squareFetch<{ invoice: SquareInvoice }>(
+    `/v2/invoices/${created.invoice.id}/publish`,
+    "POST",
+    { idempotency_key: randomUUID(), version: created.invoice.version },
+  );
+
+  await db.query(
+    `UPDATE documents SET square_invoice_id = $1, square_payment_status = $2,
+       square_public_url = $3, updated_at = now() WHERE id = $4`,
+    [published.invoice.id, published.invoice.status, published.invoice.public_url ?? null, documentId],
+  );
+
+  return {
+    squareInvoiceId: published.invoice.id,
+    status: published.invoice.status,
+    publicUrl: published.invoice.public_url ?? null,
+    squareCustomerId: customerId,
+    squareOrderId: order.order.id,
+    squareTotal: order.order.total_money?.amount ?? null,
+  };
+}
+
+// ---------- Synchronisation entrante ----------
+
+const PAID_STATUSES = new Set(["PAID", "REFUNDED", "PARTIALLY_REFUNDED"]);
+
+export function mapSquareStatus(squareStatus: string): string | null {
+  if (PAID_STATUSES.has(squareStatus)) return "payée";
+  if (squareStatus === "PARTIALLY_PAID") return "partiellement payée";
+  if (squareStatus === "CANCELED") return "annulée";
+  return null; // DRAFT/UNPAID/SCHEDULED/... : le statut local reste inchangé
+}
+
+/** Applique l'état d'une facture Square au document local correspondant. */
+export async function applySquareInvoiceUpdate(invoice: {
+  id: string;
+  status?: string;
+  public_url?: string;
+}): Promise<{ documentId: number; number: string; statusBefore: string; statusAfter: string } | null> {
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number; number: string; status: string }>(
+    "SELECT id, number, status FROM documents WHERE square_invoice_id = $1",
+    [invoice.id],
+  );
+  const doc = rows[0];
+  if (!doc || !invoice.status) return null;
+  const mapped = mapSquareStatus(invoice.status);
+  const newStatus = mapped ?? doc.status;
+  await db.query(
+    `UPDATE documents SET square_payment_status = $1, status = $2,
+       square_public_url = COALESCE($3, square_public_url), updated_at = now() WHERE id = $4`,
+    [invoice.status, newStatus, invoice.public_url ?? null, doc.id],
+  );
+  if (mapped === "payée" && doc.status !== "payée") {
+    await db.query(
+      `INSERT INTO notifications (kind, title, body, link) VALUES ('paiement', $1, $2, $3)`,
+      [
+        `Facture ${doc.number} payée`,
+        `Square confirme le paiement de la facture ${doc.number}.`,
+        `/documents/${doc.id}`,
+      ],
+    );
+  }
+  return { documentId: doc.id, number: doc.number, statusBefore: doc.status, statusAfter: newStatus };
+}
+
+export async function syncDocumentFromSquare(documentId: number): Promise<{
+  squareStatus: string;
+  document: { documentId: number; number: string; statusBefore: string; statusAfter: string } | null;
+}> {
+  const db = await getDb();
+  const { rows } = await db.query<{ square_invoice_id: string | null }>(
+    "SELECT square_invoice_id FROM documents WHERE id = $1",
+    [documentId],
+  );
+  if (!rows[0]) throw new SquareError("Document introuvable.", 404, null);
+  if (!rows[0].square_invoice_id) {
+    throw new SquareError("Cette facture n'a pas encore été envoyée vers Square.", 400, null);
+  }
+  const data = await squareFetch<{ invoice: SquareInvoice }>(
+    `/v2/invoices/${rows[0].square_invoice_id}`,
+    "GET",
+  );
+  const applied = await applySquareInvoiceUpdate(data.invoice);
+  return { squareStatus: data.invoice.status, document: applied };
+}
+
+// ---------- Webhook ----------
+
+/**
+ * Vérification de signature Square : l'en-tête `x-square-hmacsha256-signature`
+ * contient base64(HMAC-SHA256(clé, URL de notification + corps brut)).
+ * https://developer.squareup.com/docs/webhooks/step3validate
+ */
+export function verifySquareSignature(
+  notificationUrl: string,
+  rawBody: string,
+  signatureHeader: string | null,
+  signatureKey: string,
+): boolean {
+  if (!signatureHeader) return false;
+  const expected = createHmac("sha256", signatureKey)
+    .update(notificationUrl + rawBody)
+    .digest("base64");
+  return expected === signatureHeader;
+}
+
+export interface SquareWebhookEvent {
+  event_id?: string;
+  type?: string;
+  data?: { object?: { invoice?: { id: string; status?: string; public_url?: string } } };
+}
+
+export async function handleSquareWebhook(event: SquareWebhookEvent): Promise<{
+  processed: boolean;
+  detail: string;
+  document?: { documentId: number; number: string; statusBefore: string; statusAfter: string } | null;
+}> {
+  const db = await getDb();
+  const eventId = event.event_id ?? randomUUID();
+  const { rows: existing } = await db.query(
+    "SELECT event_id FROM square_events WHERE event_id = $1",
+    [eventId],
+  );
+  if (existing.length) return { processed: false, detail: "Événement déjà traité (idempotence)." };
+  await db.query(
+    "INSERT INTO square_events (event_id, event_type, payload) VALUES ($1, $2, $3)",
+    [eventId, event.type ?? "inconnu", JSON.stringify(event).slice(0, 10000)],
+  );
+  const invoice = event.data?.object?.invoice;
+  if (!event.type?.startsWith("invoice.") || !invoice?.id) {
+    return { processed: false, detail: `Type d'événement ignoré : ${event.type ?? "inconnu"}.` };
+  }
+  const document = await applySquareInvoiceUpdate(invoice);
+  return {
+    processed: document !== null,
+    detail: document
+      ? `Facture ${document.number} : ${document.statusBefore} → ${document.statusAfter}.`
+      : "Aucun document local ne correspond à cette facture Square.",
+    document,
+  };
+}

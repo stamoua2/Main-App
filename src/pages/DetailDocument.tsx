@@ -8,6 +8,7 @@ export default function DetailDocument() {
   const navigate = useNavigate();
   const [doc, setDoc] = useState<DocumentFacturation | null>(null);
   const [erreur, setErreur] = useState("");
+  const [squareEnCours, setSquareEnCours] = useState(false);
 
   useEffect(() => {
     api
@@ -23,6 +24,36 @@ export default function DetailDocument() {
       navigate(`/documents/${r.document.id}`);
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Conversion impossible.");
+    }
+  }
+
+  async function envoyerSquare() {
+    if (!doc) return;
+    setErreur("");
+    setSquareEnCours(true);
+    try {
+      await api.post(`/api/documents/${doc.id}/square`);
+      const r = await api.get<{ document: DocumentFacturation }>(`/api/documents/${doc.id}`);
+      setDoc(r.document);
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Envoi vers Square impossible.");
+    } finally {
+      setSquareEnCours(false);
+    }
+  }
+
+  async function synchroniserSquare() {
+    if (!doc) return;
+    setErreur("");
+    setSquareEnCours(true);
+    try {
+      await api.post(`/api/documents/${doc.id}/square/sync`);
+      const r = await api.get<{ document: DocumentFacturation }>(`/api/documents/${doc.id}`);
+      setDoc(r.document);
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Synchronisation impossible.");
+    } finally {
+      setSquareEnCours(false);
     }
   }
 
@@ -54,6 +85,16 @@ export default function DetailDocument() {
               Convertir en facture
             </button>
           )}
+          {!estEstimation && !doc.squareInvoiceId && (
+            <button className="btn secondary" onClick={envoyerSquare} disabled={squareEnCours}>
+              {squareEnCours ? "Envoi…" : "Envoyer vers Square"}
+            </button>
+          )}
+          {!estEstimation && doc.squareInvoiceId && (
+            <button className="btn secondary" onClick={synchroniserSquare} disabled={squareEnCours}>
+              {squareEnCours ? "Synchronisation…" : "Synchroniser le paiement Square"}
+            </button>
+          )}
           <button className="btn danger" onClick={supprimer}>
             Supprimer
           </button>
@@ -79,6 +120,17 @@ export default function DetailDocument() {
           <span>
             Convertie de l'estimation{" "}
             <Link to={`/documents/${doc.convertedFromId}`}>#{doc.convertedFromId}</Link>
+          </span>
+        )}
+        {doc.squareInvoiceId && (
+          <span>
+            <strong>Square :</strong> {doc.squareInvoiceId}{" "}
+            <span className="chip">{doc.squarePaymentStatus ?? "—"}</span>{" "}
+            {doc.squarePublicUrl && (
+              <a href={doc.squarePublicUrl} target="_blank" rel="noreferrer">
+                page de paiement
+              </a>
+            )}
           </span>
         )}
       </div>

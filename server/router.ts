@@ -13,6 +13,14 @@ import {
 } from "./auth.js";
 import { computeTotals, lineAmountCents } from "../shared/taxes.js";
 import { generateDocumentPdf, type PdfDocumentData } from "./pdf.js";
+import {
+  SquareError,
+  handleSquareWebhook,
+  pushDocumentToSquare,
+  syncDocumentFromSquare,
+  verifySquareSignature,
+} from "./square.js";
+import { MapsError, geocodeAddress, optimizeRoute, type GeoPoint } from "./routesapi.js";
 
 type Params = Record<string, string>;
 type Handler = (req: Request, params: Params, user: SessionUser) => Promise<Response>;
@@ -203,6 +211,9 @@ interface DocumentRow {
   balance_cents: number;
   notes: string;
   converted_from_id: number | null;
+  square_invoice_id: string | null;
+  square_payment_status: string | null;
+  square_public_url: string | null;
   created_at: string;
   client_name?: string;
 }
@@ -234,6 +245,9 @@ function documentToJson(row: DocumentRow, lines?: unknown[]) {
     balanceCents: row.balance_cents,
     notes: row.notes,
     convertedFromId: row.converted_from_id,
+    squareInvoiceId: row.square_invoice_id ?? null,
+    squarePaymentStatus: row.square_payment_status ?? null,
+    squarePublicUrl: row.square_public_url ?? null,
     createdAt: row.created_at,
     ...(lines ? { lines } : {}),
   };
@@ -726,21 +740,470 @@ route("GET", "/api/dashboard", async () => {
      LEFT JOIN clients c ON c.package_id = p.id GROUP BY p.id, p.name, p.position
      ORDER BY p.position`,
   );
+  const { rows: leadRows } = await db.query<LeadRow>(
+    "SELECT * FROM leads WHERE status = 'nouveau' ORDER BY id DESC LIMIT 5",
+  );
+  const { rows: unread } = await db.query<{ n: string }>(
+    "SELECT count(*) AS n FROM notifications WHERE NOT read",
+  );
+  const { rows: todaysVisits } = await db.query<{ n: string }>(
+    "SELECT count(*) AS n FROM visits WHERE scheduled_at::date = CURRENT_DATE AND status != 'annulee'",
+  );
   return json({
     clientsActifs,
     prospects,
     estimationsEnCours,
     facturesImpayees,
+    visitesAujourdhui: Number(todaysVisits[0].n),
+    notificationsNonLues: Number(unread[0].n),
+    soumissionsNouvelles: leadRows.map(leadToJson),
     documentsRecents: recents.map((r) => documentToJson(r)),
     repartitionForfaits: repartition,
   });
 });
+
+// --- Passe 2 : soumissions web (endpoint public appelé par stamourduvert.com) ---
+
+const soumissionSchema = z.object({
+  fullName: z.string().min(2, "Nom complet requis").max(200),
+  email: z.string().email("Courriel invalide").or(z.literal("")).default(""),
+  phone: z.string().max(40).default(""),
+  address: z.string().max(300).default(""),
+  sector: z.string().max(100).default(""),
+  message: z.string().max(4000).default(""),
+  // Champ pot de miel : rempli uniquement par les robots.
+  website: z.string().max(0, "Soumission rejetée.").optional(),
+});
+
+const CORS_HEADERS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
+
+route(
+  "POST",
+  "/api/public/soumission",
+  async (req) => {
+    const parsed = soumissionSchema.safeParse(await body(req));
+    if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+    const d = parsed.data;
+    const db = await getDb();
+    const { rows } = await db.query<{ id: number; created_at: string }>(
+      `INSERT INTO leads (full_name, email, phone, address, sector, message)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
+      [d.fullName, d.email, d.phone, d.address, d.sector, d.message],
+    );
+    await db.query(
+      `INSERT INTO notifications (kind, title, body, link) VALUES ('soumission', $1, $2, $3)`,
+      [
+        `Nouvelle soumission web — ${d.fullName}`,
+        [d.address, d.sector, d.message].filter(Boolean).join(" · ").slice(0, 500),
+        "/soumissions",
+      ],
+    );
+    return json({ ok: true, prospect: rows[0].id }, 201, CORS_HEADERS);
+  },
+  { auth: false },
+);
+
+// --- Prospects (soumissions reçues) ---
+
+interface LeadRow {
+  id: number;
+  full_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  sector: string;
+  message: string;
+  status: string;
+  client_id: number | null;
+  created_at: string;
+}
+
+function leadToJson(row: LeadRow) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    email: row.email,
+    phone: row.phone,
+    address: row.address,
+    sector: row.sector,
+    message: row.message,
+    status: row.status,
+    clientId: row.client_id,
+    createdAt: row.created_at,
+  };
+}
+
+route("GET", "/api/leads", async () => {
+  const db = await getDb();
+  const { rows } = await db.query<LeadRow>("SELECT * FROM leads ORDER BY id DESC");
+  return json({ prospects: rows.map(leadToJson) });
+});
+
+route("PUT", "/api/leads/:id", async (req, params) => {
+  const parsed = z
+    .object({ status: z.enum(["nouveau", "contacté", "converti", "fermé"]) })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const db = await getDb();
+  const { rows } = await db.query<LeadRow>(
+    "UPDATE leads SET status = $1 WHERE id = $2 RETURNING *",
+    [parsed.data.status, Number(params.id)],
+  );
+  if (!rows[0]) return error("Prospect introuvable.", 404);
+  return json({ prospect: leadToJson(rows[0]) });
+});
+
+// Conversion d'un prospect en client
+route("POST", "/api/leads/:id/convert", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query<LeadRow>("SELECT * FROM leads WHERE id = $1", [Number(params.id)]);
+  const lead = rows[0];
+  if (!lead) return error("Prospect introuvable.", 404);
+  if (lead.client_id) return error("Ce prospect a déjà été converti.", 409);
+  const nameParts = lead.full_name.trim().split(/\s+/);
+  const firstName = nameParts[0] ?? "";
+  const lastName = nameParts.slice(1).join(" ") || firstName;
+  const { rows: created } = await db.query<{ id: number }>(
+    `INSERT INTO clients (first_name, last_name, email, phone, address_line, city, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,'prospect',$7) RETURNING id`,
+    [
+      firstName,
+      lastName,
+      lead.email,
+      lead.phone,
+      lead.address,
+      lead.sector,
+      `Issu de la soumission web du ${String(lead.created_at).slice(0, 10)}. ${lead.message}`.trim(),
+    ],
+  );
+  await db.query("UPDATE leads SET status = 'converti', client_id = $1 WHERE id = $2", [
+    created[0].id,
+    lead.id,
+  ]);
+  const { rows: clientRows } = await db.query<ClientRow>(`${CLIENT_SELECT} WHERE c.id = $1`, [created[0].id]);
+  return json({ client: clientToJson(clientRows[0]) }, 201);
+});
+
+// --- Notifications ---
+
+route("GET", "/api/notifications", async (req) => {
+  const db = await getDb();
+  const url = new URL(req.url);
+  const where = url.searchParams.get("nonLues") ? "WHERE NOT read" : "";
+  const { rows } = await db.query(
+    `SELECT id, kind, title, body, link, read, created_at FROM notifications ${where} ORDER BY id DESC LIMIT 50`,
+  );
+  const { rows: unread } = await db.query<{ n: string }>(
+    "SELECT count(*) AS n FROM notifications WHERE NOT read",
+  );
+  return json({ notifications: rows, nonLues: Number(unread[0].n) });
+});
+
+route("POST", "/api/notifications/lues", async (req) => {
+  const parsed = z.object({ ids: z.array(z.number().int()).optional() }).safeParse(await body(req));
+  const db = await getDb();
+  if (parsed.success && parsed.data.ids?.length) {
+    await db.query("UPDATE notifications SET read = true WHERE id = ANY($1)", [parsed.data.ids]);
+  } else {
+    await db.query("UPDATE notifications SET read = true WHERE NOT read");
+  }
+  return json({ ok: true });
+});
+
+// --- Visites (calendrier) ---
+
+const visitSchema = z.object({
+  clientId: z.number().int(),
+  scheduledAt: z.string().min(10, "Date/heure requise"),
+  durationMinutes: z.number().int().min(5).max(600).default(45),
+  services: z.string().default(""),
+  status: z.enum(["planifiee", "faite", "annulee"]).default("planifiee"),
+  notes: z.string().default(""),
+});
+
+interface VisitRow {
+  id: number;
+  client_id: number;
+  scheduled_at: string;
+  duration_minutes: number;
+  services: string;
+  status: string;
+  route_position: number | null;
+  notes: string;
+  client_name?: string;
+  address_line?: string;
+  city?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+function visitToJson(row: VisitRow) {
+  const raw = row.scheduled_at as unknown;
+  const iso = raw instanceof Date ? raw.toISOString() : String(raw);
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    clientName: row.client_name,
+    addressLine: row.address_line,
+    city: row.city,
+    scheduledAt: iso,
+    durationMinutes: row.duration_minutes,
+    services: row.services,
+    status: row.status,
+    routePosition: row.route_position,
+    notes: row.notes,
+  };
+}
+
+const VISIT_SELECT = `SELECT v.*, (c.first_name || ' ' || c.last_name) AS client_name,
+    c.address_line, c.city, c.latitude, c.longitude
+  FROM visits v JOIN clients c ON c.id = v.client_id`;
+
+route("GET", "/api/visits", async (req) => {
+  const db = await getDb();
+  const url = new URL(req.url);
+  const date = url.searchParams.get("date");
+  const { rows } = date
+    ? await db.query<VisitRow>(
+        `${VISIT_SELECT} WHERE v.scheduled_at::date = $1::date ORDER BY v.scheduled_at`,
+        [date],
+      )
+    : await db.query<VisitRow>(`${VISIT_SELECT} ORDER BY v.scheduled_at DESC LIMIT 100`);
+  return json({ visites: rows.map(visitToJson) });
+});
+
+route("POST", "/api/visits", async (req) => {
+  const parsed = visitSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows: clientRows } = await db.query("SELECT id FROM clients WHERE id = $1", [d.clientId]);
+  if (!clientRows.length) return error("Client introuvable.", 404);
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO visits (client_id, scheduled_at, duration_minutes, services, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [d.clientId, d.scheduledAt, d.durationMinutes, d.services, d.status, d.notes],
+  );
+  const { rows: created } = await db.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [rows[0].id]);
+  return json({ visite: visitToJson(created[0]) }, 201);
+});
+
+route("PUT", "/api/visits/:id", async (req, params) => {
+  const parsed = visitSchema.partial().safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const map: [string, unknown][] = [
+    ["client_id", d.clientId],
+    ["scheduled_at", d.scheduledAt],
+    ["duration_minutes", d.durationMinutes],
+    ["services", d.services],
+    ["status", d.status],
+    ["notes", d.notes],
+  ];
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [col, val] of map) {
+    if (val !== undefined) {
+      values.push(val);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(Number(params.id));
+  const { rows } = await db.query(
+    `UPDATE visits SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING id`,
+    values,
+  );
+  if (!rows.length) return error("Visite introuvable.", 404);
+  const { rows: updated } = await db.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [Number(params.id)]);
+  return json({ visite: visitToJson(updated[0]) });
+});
+
+route("DELETE", "/api/visits/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM visits WHERE id = $1 RETURNING id", [Number(params.id)]);
+  if (!rows.length) return error("Visite introuvable.", 404);
+  return json({ ok: true, supprime: Number(params.id) });
+});
+
+// --- Optimisation de route (Google Routes API) ---
+
+route("POST", "/api/routes/optimize", async (req) => {
+  const parsed = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(await body(req));
+  if (!parsed.success) return error("Date invalide (AAAA-MM-JJ attendu).", 400);
+  const db = await getDb();
+  const { rows: visits } = await db.query<VisitRow>(
+    `${VISIT_SELECT} WHERE v.scheduled_at::date = $1::date AND v.status != 'annulee'
+     ORDER BY v.scheduled_at`,
+    [parsed.data.date],
+  );
+  if (visits.length < 2) {
+    return error("Au moins 2 visites planifiées ce jour-là sont nécessaires.", 400);
+  }
+
+  try {
+    // Géocode les clients sans coordonnées (persisté sur la fiche client).
+    for (const v of visits) {
+      if (v.latitude == null || v.longitude == null) {
+        const geo = await geocodeAddress(`${v.address_line}, ${v.city}, QC, Canada`);
+        await db.query(
+          "UPDATE clients SET latitude = $1, longitude = $2, updated_at = now() WHERE id = $3",
+          [geo.lat, geo.lng, v.client_id],
+        );
+        v.latitude = geo.lat;
+        v.longitude = geo.lng;
+      }
+    }
+
+    // Dépôt : adresse de base de l'entreprise (géocodée une seule fois).
+    const { rows: settingsRows } = await db.query<{
+      base_address: string;
+      base_latitude: number | null;
+      base_longitude: number | null;
+    }>("SELECT base_address, base_latitude, base_longitude FROM settings WHERE id = 1");
+    let depot: GeoPoint;
+    const s = settingsRows[0];
+    if (s.base_latitude != null && s.base_longitude != null) {
+      depot = { lat: s.base_latitude, lng: s.base_longitude };
+    } else {
+      const geo = await geocodeAddress(s.base_address);
+      depot = { lat: geo.lat, lng: geo.lng };
+      await db.query(
+        "UPDATE settings SET base_latitude = $1, base_longitude = $2, updated_at = now() WHERE id = 1",
+        [geo.lat, geo.lng],
+      );
+    }
+
+    const stops = visits.map((v) => ({ lat: v.latitude as number, lng: v.longitude as number }));
+    const plan = await optimizeRoute(depot, stops);
+
+    // Persiste l'ordre optimisé sur les visites.
+    for (let position = 0; position < plan.optimized.order.length; position++) {
+      const visitIndex = plan.optimized.order[position];
+      await db.query("UPDATE visits SET route_position = $1 WHERE id = $2", [
+        position + 1,
+        visits[visitIndex].id,
+      ]);
+    }
+
+    const describe = (order: number[]) =>
+      order.map((i, position) => ({
+        arret: position + 1,
+        visiteId: visits[i].id,
+        client: visits[i].client_name,
+        adresse: `${visits[i].address_line}, ${visits[i].city}`,
+      }));
+
+    return json({
+      date: parsed.data.date,
+      depot: { adresse: s.base_address, ...depot },
+      optimise: {
+        ordre: describe(plan.optimized.order),
+        distanceMetres: plan.optimized.distanceMeters,
+        dureeSecondes: plan.optimized.durationSeconds,
+        segments: plan.optimized.legs,
+      },
+      naif: {
+        ordre: describe(plan.naive.order),
+        distanceMetres: plan.naive.distanceMeters,
+        dureeSecondes: plan.naive.durationSeconds,
+      },
+      gainMetres: plan.improvementMeters,
+      gainSecondes: plan.improvementSeconds,
+    });
+  } catch (err) {
+    if (err instanceof MapsError) return error(err.message, err.status);
+    throw err;
+  }
+});
+
+// Géocodage manuel d'un client
+route("POST", "/api/clients/:id/geocode", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query<ClientRow>("SELECT * FROM clients WHERE id = $1", [Number(params.id)]);
+  if (!rows[0]) return error("Client introuvable.", 404);
+  try {
+    const geo = await geocodeAddress(
+      `${rows[0].address_line}, ${rows[0].city}, ${rows[0].province}, Canada`,
+    );
+    await db.query(
+      "UPDATE clients SET latitude = $1, longitude = $2, updated_at = now() WHERE id = $3",
+      [geo.lat, geo.lng, rows[0].id],
+    );
+    return json({ latitude: geo.lat, longitude: geo.lng, adresseFormatee: geo.formatted });
+  } catch (err) {
+    if (err instanceof MapsError) return error(err.message, err.status);
+    throw err;
+  }
+});
+
+// --- Square ---
+
+route("POST", "/api/documents/:id/square", async (_req, params) => {
+  try {
+    const result = await pushDocumentToSquare(Number(params.id));
+    return json({ square: result }, 201);
+  } catch (err) {
+    if (err instanceof SquareError) return error(err.message, err.status >= 400 && err.status < 600 ? err.status : 502);
+    throw err;
+  }
+});
+
+route("POST", "/api/documents/:id/square/sync", async (_req, params) => {
+  try {
+    const result = await syncDocumentFromSquare(Number(params.id));
+    return json({ square: result });
+  } catch (err) {
+    if (err instanceof SquareError) return error(err.message, err.status >= 400 && err.status < 600 ? err.status : 502);
+    throw err;
+  }
+});
+
+// Webhook Square (public; signature HMAC obligatoire).
+route(
+  "POST",
+  "/api/webhooks/square",
+  async (req) => {
+    const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY;
+    if (!signatureKey) {
+      return error("SQUARE_WEBHOOK_SIGNATURE_KEY non configurée : webhook refusé.", 503);
+    }
+    const rawBody = await req.text();
+    const notificationUrl = process.env.SQUARE_WEBHOOK_NOTIFICATION_URL || req.url;
+    const valid = verifySquareSignature(
+      notificationUrl,
+      rawBody,
+      req.headers.get("x-square-hmacsha256-signature"),
+      signatureKey,
+    );
+    if (!valid) return error("Signature Square invalide.", 401);
+    let event: unknown;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return error("Corps JSON invalide.", 400);
+    }
+    const result = await handleSquareWebhook(event as Parameters<typeof handleSquareWebhook>[0]);
+    return json(result);
+  },
+  { auth: false },
+);
 
 // ---------- Répartiteur ----------
 
 export async function handleApiRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
+
+  // Préflight CORS pour l'endpoint public de soumission (appelé par le site vitrine).
+  if (req.method === "OPTIONS" && path === "/api/public/soumission") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
 
   for (const r of routes) {
     if (r.method !== req.method) continue;

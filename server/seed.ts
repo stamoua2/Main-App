@@ -2,7 +2,7 @@
 
 import type { Db } from "./db.js";
 import { hashPassword } from "./auth.js";
-import { SEED_ALEX, SEED_TEST_CLIENT, SITE_PACKAGES, SITE_SERVICES } from "./seed-data.js";
+import { SEED_ALEX, SEED_TEST_CLIENTS, SITE_PACKAGES, SITE_SERVICES } from "./seed-data.js";
 
 export async function seedAll(db: Db, options: { alexPassword?: string } = {}): Promise<void> {
   // Compte d'Alex
@@ -52,31 +52,34 @@ export async function seedAll(db: Db, options: { alexPassword?: string } = {}): 
     );
   }
 
-  // Client test avec adresse réelle de la région
-  const { rows: existingClient } = await db.query(
-    "SELECT id FROM clients WHERE email = $1",
-    [SEED_TEST_CLIENT.email],
-  );
-  if (existingClient.length === 0) {
-    const { rows: pkgRows } = await db.query<{ id: number }>(
-      "SELECT id FROM packages WHERE slug = 'essentiel'",
+  // Clients test avec adresses réelles de la région
+  for (const client of SEED_TEST_CLIENTS) {
+    const { rows: existingClient } = await db.query(
+      "SELECT id FROM clients WHERE email = $1",
+      [client.email],
     );
-    await db.query(
-      `INSERT INTO clients (first_name, last_name, email, phone, address_line, city, province, postal_code, status, notes, package_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [
-        SEED_TEST_CLIENT.first_name,
-        SEED_TEST_CLIENT.last_name,
-        SEED_TEST_CLIENT.email,
-        SEED_TEST_CLIENT.phone,
-        SEED_TEST_CLIENT.address_line,
-        SEED_TEST_CLIENT.city,
-        SEED_TEST_CLIENT.province,
-        SEED_TEST_CLIENT.postal_code,
-        SEED_TEST_CLIENT.status,
-        SEED_TEST_CLIENT.notes,
-        pkgRows[0]?.id ?? null,
-      ],
-    );
+    if (existingClient.length === 0) {
+      const { rows: pkgRows } = await db.query<{ id: number }>(
+        "SELECT id FROM packages WHERE slug = $1",
+        [client.package_slug],
+      );
+      await db.query(
+        `INSERT INTO clients (first_name, last_name, email, phone, address_line, city, province, postal_code, status, notes, package_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          client.first_name,
+          client.last_name,
+          client.email,
+          client.phone,
+          client.address_line,
+          client.city,
+          client.province,
+          client.postal_code,
+          client.status,
+          client.notes,
+          pkgRows[0]?.id ?? null,
+        ],
+      );
+    }
   }
 }

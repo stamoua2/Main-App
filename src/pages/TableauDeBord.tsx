@@ -8,6 +8,16 @@ interface Dashboard {
   prospects: number;
   estimationsEnCours: number;
   facturesImpayees: number;
+  visitesAujourdhui: number;
+  notificationsNonLues: number;
+  soumissionsNouvelles: {
+    id: number;
+    fullName: string;
+    address: string;
+    sector: string;
+    message: string;
+    createdAt: string;
+  }[];
   documentsRecents: DocumentFacturation[];
   repartitionForfaits: { name: string; clients: number }[];
 }
@@ -50,7 +60,37 @@ export default function TableauDeBord() {
           <div className="label">Factures impayées</div>
           <div className="value">{data.facturesImpayees}</div>
         </div>
+        <div className="panel stat">
+          <div className="label">Visites aujourd'hui</div>
+          <div className="value">{data.visitesAujourdhui}</div>
+        </div>
       </div>
+
+      {data.soumissionsNouvelles.length > 0 && (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2>
+            Nouvelles demandes du site web{" "}
+            <Link to="/soumissions" style={{ fontSize: 13, fontWeight: 500 }}>
+              Tout voir →
+            </Link>
+          </h2>
+          <table className="data">
+            <tbody>
+              {data.soumissionsNouvelles.map((s) => (
+                <tr key={s.id}>
+                  <td>{String(s.createdAt).slice(0, 10)}</td>
+                  <td>
+                    <strong>{s.fullName}</strong>
+                  </td>
+                  <td style={{ color: "var(--muted)" }}>
+                    {[s.address, s.sector, s.message].filter(Boolean).join(" · ").slice(0, 120)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="grid cols-2" style={{ marginTop: 20 }}>
         <div className="panel">

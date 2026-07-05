@@ -51,6 +51,14 @@ async function createDb(): Promise<Db> {
   for (const statement of DDL) {
     await db.query(statement);
   }
+  // Amorçage automatique : au premier démarrage (aucun utilisateur), insère
+  // les données de départ — compte d'Alex (SEED_ALEX_PASSWORD), forfaits du
+  // site, catalogue de services, client de démonstration.
+  const { rows } = await db.query<{ n: string }>("SELECT count(*) AS n FROM users");
+  if (Number(rows[0].n) === 0) {
+    const { seedAll } = await import("./seed.js");
+    await seedAll(db);
+  }
   return db;
 }
 
