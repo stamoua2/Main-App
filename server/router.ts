@@ -313,7 +313,9 @@ route(
       ? "DATABASE_URL"
       : process.env.NETLIFY_DATABASE_URL
         ? "NETLIFY_DATABASE_URL"
-        : "aucune (PGlite locale)";
+        : process.env.NETLIFY_DB_URL
+          ? "NETLIFY_DB_URL"
+          : "aucune (PGlite locale)";
     const variables = {
       GOOGLE_MAPS_API_KEY: Boolean(process.env.GOOGLE_MAPS_API_KEY),
       SQUARE_ACCESS_TOKEN: Boolean(process.env.SQUARE_ACCESS_TOKEN),

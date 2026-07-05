@@ -21,7 +21,10 @@ export class DbNotProvisionedError extends Error {}
 let dbPromise: Promise<Db> | null = null;
 
 async function createDb(): Promise<Db> {
-  const url = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL;
+  const url =
+    process.env.DATABASE_URL ||
+    process.env.NETLIFY_DATABASE_URL ||
+    process.env.NETLIFY_DB_URL;
   let db: Db;
   if (url) {
     const { neon } = await import("@neondatabase/serverless");
