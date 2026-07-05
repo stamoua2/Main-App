@@ -104,6 +104,36 @@ export default function TableauDeBord() {
         </div>
       )}
 
+      <div className="panel" style={{ marginTop: 20 }}>
+        <h2>État des déploiements Netlify</h2>
+        <div style={{ display: "flex", gap: 26, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ fontSize: 13.5 }}>Site vitrine (stamourduvert.com) :</span>
+            <a href="https://app.netlify.com/projects/stamourduvert/deploys" target="_blank" rel="noreferrer">
+              <img
+                src="https://api.netlify.com/api/v1/badges/c69739ef-f7a7-4886-8997-12d00c4cd883/deploy-status"
+                alt="Statut du déploiement du site vitrine"
+                height={20}
+              />
+            </a>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ fontSize: 13.5 }}>Gestionnaire (cette application) :</span>
+            <a href="https://app.netlify.com/projects/mainappsav/deploys" target="_blank" rel="noreferrer">
+              <img
+                src="https://api.netlify.com/api/v1/badges/b5ef1f7c-c8bf-4e55-a515-4bc19199b933/deploy-status"
+                alt="Statut du déploiement du gestionnaire"
+                height={20}
+              />
+            </a>
+          </div>
+        </div>
+        <p style={{ color: "var(--muted)", fontSize: 12.5, marginTop: 8, marginBottom: 0 }}>
+          Les badges se mettent à jour automatiquement selon le dernier déploiement de
+          production; cliquez pour ouvrir la liste des déploiements dans Netlify.
+        </p>
+      </div>
+
       <div className="grid cols-2" style={{ marginTop: 20 }}>
         <div className="panel">
           <h2>Documents récents</h2>

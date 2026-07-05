@@ -120,7 +120,7 @@ export default function FicheClient() {
             <p>
               <strong>Superficie du terrain :</strong>{" "}
               {client.lotAreaM2
-                ? `${Math.round(m2ToFt2(client.lotAreaM2)).toLocaleString("fr-CA")} pi² (${client.lotAreaM2.toLocaleString("fr-CA", { maximumFractionDigits: 1 })} m²)`
+                ? `${Math.round(m2ToFt2(client.lotAreaM2)).toLocaleString("fr-CA")} pi²`
                 : "Non mesurée"}
             </p>
             <Link className="btn secondary small" to={`/superficie?client=${client.id}`}>

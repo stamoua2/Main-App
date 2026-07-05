@@ -14,14 +14,27 @@ import { formatCad, parseCadToCents } from "../../shared/money";
 import { M2_TO_FT2 } from "../../shared/area";
 import { margeDepuisPrix, prixDepuisMarge } from "../../shared/pricing";
 
+// L'interface travaille exclusivement en pi²; la base et l'API restent en
+// unités métriques. Doses : 1000 pi² = 92,903 m², donc
+// dose/100 m² = dose/1000 pi² × (M2_TO_FT2 / 10).
+const DOSE_M2_PAR_1000PI2 = M2_TO_FT2 / 10;
+
 // Réglage local (marge/prix) par forfait — les deux champs restent synchronisés.
 interface Reglage {
   margeStr: string;
   prixStr: string;
 }
 
+// Ligne de l'éditeur : la dose est saisie par 1000 pi².
+type LigneProduit = ProduitForfait & { dose1000Str: string };
+
 function centsToDollarsStr(cents: number): string {
   return (cents / 100).toFixed(2).replace(".", ",");
+}
+
+function dose1000Str(dosePer100m2: number): string {
+  const v = dosePer100m2 / DOSE_M2_PAR_1000PI2;
+  return String(Math.round(v * 1000) / 1000).replace(".", ",");
 }
 
 export default function Forfaits() {
@@ -30,8 +43,7 @@ export default function Forfaits() {
   const [clients, setClients] = useState<Client[]>([]);
 
   // --- Calculateur ---
-  const [m2Str, setM2Str] = useState("500");
-  const [ft2Str, setFt2Str] = useState(Math.round(500 * M2_TO_FT2).toString());
+  const [ft2Str, setFt2Str] = useState("5000");
   const [clientId, setClientId] = useState("");
   const [cotation, setCotation] = useState<Cotation | null>(null);
   const [reglages, setReglages] = useState<Record<number, Reglage>>({});
@@ -41,14 +53,14 @@ export default function Forfaits() {
 
   // --- Éditeur de produits d'un forfait ---
   const [editionId, setEditionId] = useState<number | null>(null);
-  const [produits, setProduits] = useState<ProduitForfait[]>([]);
+  const [produits, setProduits] = useState<LigneProduit[]>([]);
   const [visitCountStr, setVisitCountStr] = useState("");
   const [visitCostStr, setVisitCostStr] = useState("");
   const [inventaire, setInventaire] = useState<ProduitInventaire[]>([]);
   const [messageEdit, setMessageEdit] = useState("");
   const [erreurEdit, setErreurEdit] = useState("");
 
-  const areaM2 = useMemo(() => Number(m2Str.replace(",", ".")) || 0, [m2Str]);
+  const areaFt2 = useMemo(() => Number(ft2Str.replace(",", ".")) || 0, [ft2Str]);
 
   useEffect(() => {
     api.get<{ forfaits: Forfait[] }>("/api/packages").then((r) => setForfaits(r.forfaits));
@@ -58,13 +70,13 @@ export default function Forfaits() {
   // Cotation serveur (coûts + prix à la marge sauvegardée), avec anti-rebond.
   useEffect(() => {
     window.clearTimeout(debounceRef.current);
-    if (!(areaM2 > 0)) {
+    if (!(areaFt2 > 0)) {
       setCotation(null);
       return;
     }
     debounceRef.current = window.setTimeout(async () => {
       try {
-        const r = await api.get<Cotation>(`/api/pricing/quote?areaM2=${areaM2}`);
+        const r = await api.get<Cotation>(`/api/pricing/quote?areaFt2=${areaFt2}`);
         setErreurCalc("");
         setCotation(r);
         // Conserve les marges ajustées localement; recalcule les prix.
@@ -85,24 +97,12 @@ export default function Forfaits() {
       }
     }, 300);
     return () => window.clearTimeout(debounceRef.current);
-  }, [areaM2]);
-
-  function changerM2(v: string) {
-    setM2Str(v);
-    const n = Number(v.replace(",", "."));
-    setFt2Str(n > 0 ? String(Math.round(n * M2_TO_FT2)) : "");
-  }
-
-  function changerFt2(v: string) {
-    setFt2Str(v);
-    const n = Number(v.replace(",", "."));
-    setM2Str(n > 0 ? String(Math.round((n / M2_TO_FT2) * 10) / 10) : "");
-  }
+  }, [areaFt2]);
 
   function choisirClient(id: string) {
     setClientId(id);
     const c = clients.find((x) => x.id === Number(id));
-    if (c?.lotAreaM2) changerM2(String(Math.round(c.lotAreaM2 * 10) / 10));
+    if (c?.lotAreaM2) setFt2Str(String(Math.round(c.lotAreaM2 * M2_TO_FT2)));
   }
 
   function changerMarge(f: CotationForfait, v: string) {
@@ -158,14 +158,13 @@ export default function Forfaits() {
       return;
     }
     try {
-      const m2 = Math.round(areaM2 * 10) / 10;
-      const ft2 = Math.round(areaM2 * M2_TO_FT2);
+      const ft2 = Math.round(areaFt2).toLocaleString("fr-CA");
       const r = await api.post<{ document: { id: number } }>("/api/documents", {
         kind: "estimation",
         clientId: Number(clientId),
         lines: [
           {
-            description: `Forfait ${f.name} — programme d'entretien de pelouse, ${f.visitCount} visites par saison (superficie ${String(m2).replace(".", ",")} m² / ${ft2} pi²)`,
+            description: `Forfait ${f.name} — programme d'entretien de pelouse, ${f.visitCount} visites par saison (superficie ${ft2} pi²)`,
             quantity: 1,
             unitPriceCents: prixCents,
           },
@@ -186,14 +185,14 @@ export default function Forfaits() {
     setVisitCountStr(String(f.visitCount));
     setVisitCostStr(centsToDollarsStr(f.visitCostCents));
     const r = await api.get<{ produits: ProduitForfait[] }>(`/api/packages/${f.id}/products`);
-    setProduits(r.produits);
+    setProduits(r.produits.map((p) => ({ ...p, dose1000Str: dose1000Str(p.dosePer100m2) })));
     if (!inventaire.length) {
       const inv = await api.get<{ produits: ProduitInventaire[] }>("/api/inventory");
       setInventaire(inv.produits);
     }
   }
 
-  function modifierProduit(index: number, patch: Partial<ProduitForfait>) {
+  function modifierProduit(index: number, patch: Partial<LigneProduit>) {
     setProduits((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   }
 
@@ -234,8 +233,8 @@ export default function Forfaits() {
       });
       setMessageEdit("Produits et paramètres du forfait sauvegardés.");
       // Rafraîchit la cotation avec les nouveaux coûts.
-      if (areaM2 > 0) {
-        const r = await api.get<Cotation>(`/api/pricing/quote?areaM2=${areaM2}`);
+      if (areaFt2 > 0) {
+        const r = await api.get<Cotation>(`/api/pricing/quote?areaFt2=${areaFt2}`);
         setCotation(r);
         setReglages((prev) => {
           const next = { ...prev };
@@ -272,19 +271,15 @@ export default function Forfaits() {
       <div className="panel">
         <h2>Calculateur de soumission</h2>
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
-          Entrez la superficie du terrain (ou choisissez un client mesuré avec l'outil
-          Superficie) : le coût des produits et des visites est calculé pour chaque
-          forfait, puis le prix suggéré selon la marge de profit — ajustez la marge ou
-          le prix, l'autre suit.
+          Entrez la superficie du terrain en pi² (ou choisissez un client mesuré avec
+          l'outil Superficie) : le coût des produits et des visites est calculé pour
+          chaque forfait, puis le prix suggéré selon la marge de profit — ajustez la
+          marge ou le prix, l'autre suit.
         </p>
         <div className="form-grid">
           <label className="field">
-            Superficie (m²)
-            <input value={m2Str} onChange={(e) => changerM2(e.target.value)} inputMode="decimal" />
-          </label>
-          <label className="field">
             Superficie (pi²)
-            <input value={ft2Str} onChange={(e) => changerFt2(e.target.value)} inputMode="decimal" />
+            <input value={ft2Str} onChange={(e) => setFt2Str(e.target.value)} inputMode="decimal" />
           </label>
           <label className="field">
             Client (optionnel — pour créer la soumission)
@@ -293,7 +288,9 @@ export default function Forfaits() {
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.fullName}
-                  {c.lotAreaM2 ? ` (${Math.round(c.lotAreaM2)} m² mesurés)` : ""}
+                  {c.lotAreaM2
+                    ? ` (${Math.round(c.lotAreaM2 * M2_TO_FT2).toLocaleString("fr-CA")} pi² mesurés)`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -400,7 +397,7 @@ export default function Forfaits() {
         <div className="panel">
           <h2>Produits appliqués — forfait {forfaitEnEdition.name}</h2>
           <p style={{ color: "var(--muted)", fontSize: 13 }}>
-            Dose par 100 m² pour une application; la contenance est la quantité du
+            Dose par 1000 pi² pour une application; la contenance est la quantité du
             format acheté (ex. sac de 25 kg → 25, caisse « 2 x 10 L » → 20). Le coût
             du format vient de l'inventaire quand un produit est lié.
           </p>
@@ -411,7 +408,7 @@ export default function Forfaits() {
                   <tr>
                     <th>Produit d'inventaire</th>
                     <th>Libellé</th>
-                    <th>Dose / 100 m²</th>
+                    <th>Dose / 1000 pi²</th>
                     <th>Unité</th>
                     <th>Contenance</th>
                     <th>Applications</th>
@@ -442,9 +439,16 @@ export default function Forfaits() {
                       <td>
                         <input
                           style={{ width: 80 }}
-                          value={String(p.dosePer100m2)}
+                          value={p.dose1000Str}
                           onChange={(e) =>
-                            modifierProduit(i, { dosePer100m2: Number(e.target.value.replace(",", ".")) || 0 })
+                            // La valeur métrique n'est recalculée que sur une
+                            // vraie modification : pas de dérive d'arrondi en
+                            // sauvegardant sans toucher à la dose.
+                            modifierProduit(i, {
+                              dose1000Str: e.target.value,
+                              dosePer100m2:
+                                (Number(e.target.value.replace(",", ".")) || 0) * DOSE_M2_PAR_1000PI2,
+                            })
                           }
                           inputMode="decimal"
                         />
@@ -517,7 +521,8 @@ export default function Forfaits() {
                   {
                     itemId: null,
                     label: "",
-                    dosePer100m2: 1,
+                    dosePer100m2: 0,
+                    dose1000Str: "1",
                     doseUnit: "kg",
                     formatQuantity: 1,
                     applications: 1,

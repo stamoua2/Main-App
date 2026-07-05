@@ -64,6 +64,7 @@ export default function Parametres() {
         tvqNumber: parametres.tvqNumber,
         companyPhone: parametres.companyPhone,
         companyEmail: parametres.companyEmail,
+        companyWebsite: parametres.companyWebsite,
         companyAddress: parametres.companyAddress,
       });
       setParametres(r.parametres);
@@ -121,6 +122,14 @@ export default function Parametres() {
               <input
                 value={parametres.companyEmail}
                 onChange={(e) => setParametres({ ...parametres, companyEmail: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              Site web
+              <input
+                value={parametres.companyWebsite}
+                onChange={(e) => setParametres({ ...parametres, companyWebsite: e.target.value })}
+                placeholder="www.stamourduvert.com"
               />
             </label>
             <label className="field check" style={{ alignSelf: "end" }}>

@@ -258,6 +258,9 @@ export const DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(spent_on)`,
   `CREATE INDEX IF NOT EXISTS idx_revenues_date ON revenues(received_on)`,
 
+  // Site web de l'entreprise (affiché sur les PDF).
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS company_website TEXT NOT NULL DEFAULT 'www.stamourduvert.com'`,
+
   // ---- Calculateur de prix des forfaits ----
   // Nombre de visites (numérique), coût fixe par visite (déplacement,
   // main-d'œuvre) et marge de profit par défaut, ajustables par forfait.

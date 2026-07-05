@@ -118,6 +118,7 @@ const settingsSchema = z.object({
   companyAddress: z.string().optional(),
   companyEmail: z.string().optional(),
   companyPhone: z.string().optional(),
+  companyWebsite: z.string().optional(),
   taxesEnabled: z.boolean().optional(),
   tpsRate: z.number().min(0).max(1).optional(),
   tvqRate: z.number().min(0).max(1).optional(),
@@ -180,6 +181,7 @@ async function getSettings() {
     company_address: string;
     company_email: string;
     company_phone: string;
+    company_website: string;
     taxes_enabled: boolean;
     tps_rate: string;
     tvq_rate: string;
@@ -193,6 +195,7 @@ async function getSettings() {
     companyAddress: s.company_address,
     companyEmail: s.company_email,
     companyPhone: s.company_phone,
+    companyWebsite: s.company_website,
     taxesEnabled: s.taxes_enabled,
     tpsRate: Number(s.tps_rate),
     tvqRate: Number(s.tvq_rate),
@@ -476,6 +479,7 @@ route("PUT", "/api/settings", async (req) => {
     ["company_address", d.companyAddress],
     ["company_email", d.companyEmail],
     ["company_phone", d.companyPhone],
+    ["company_website", d.companyWebsite],
     ["taxes_enabled", d.taxesEnabled],
     ["tps_rate", d.tpsRate],
     ["tvq_rate", d.tvqRate],
@@ -1039,6 +1043,7 @@ route("GET", "/api/documents/:id/pdf", async (_req, params) => {
       address: settings.companyAddress,
       email: settings.companyEmail,
       phone: settings.companyPhone,
+      website: settings.companyWebsite,
       tpsNumber: settings.tpsNumber,
       tvqNumber: settings.tvqNumber,
       estimateValidityDays: settings.estimateValidityDays,

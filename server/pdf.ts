@@ -54,6 +54,7 @@ export interface PdfDocumentData {
     address: string;
     email: string;
     phone: string;
+    website: string;
     tpsNumber: string;
     tvqNumber: string;
     estimateValidityDays: number;
@@ -144,7 +145,11 @@ export async function generateDocumentPdf(data: PdfDocumentData): Promise<Uint8A
   ctx.page.drawRectangle({ x: 0, y: PAGE_H - bandH, width: PAGE_W, height: bandH, color: GREEN_FOREST });
   drawLeft(ctx, data.company.name, MARGIN, PAGE_H - 44, 21, bold, WHITE);
   drawLeft(ctx, "Entretien de pelouse — L'Ange-Gardien (Outaouais)", MARGIN, PAGE_H - 60, 9.5, font, MINT);
-  drawLeft(ctx, `${data.company.phone}  ·  ${data.company.email}`, MARGIN, PAGE_H - 74, 9.5, font, WHITE);
+  drawLeft(
+    ctx,
+    [data.company.phone, data.company.email, data.company.website].filter(Boolean).join("  ·  "),
+    MARGIN, PAGE_H - 74, 9.5, font, WHITE,
+  );
   drawLeft(ctx, data.company.address, MARGIN, PAGE_H - 87, 9.5, font, MINT);
   drawRight(ctx, title, PAGE_W - MARGIN, PAGE_H - 46, 19, bold, WHITE);
   drawRight(ctx, `No ${data.number}`, PAGE_W - MARGIN, PAGE_H - 63, 10.5, font, WHITE);
@@ -301,7 +306,11 @@ export async function generateDocumentPdf(data: PdfDocumentData): Promise<Uint8A
         : "Merci de faire confiance à St-Amour du Vert pour l'entretien de votre pelouse !";
     p.drawText(sanitize(thanks), { x: MARGIN, y: 34, size: 9, font, color: GREEN_FOREST });
     p.drawText(
-      sanitize(`${data.company.name} · ${data.company.address} · ${data.company.phone} · ${data.company.email}`),
+      sanitize(
+        [data.company.name, data.company.address, data.company.phone, data.company.email, data.company.website]
+          .filter(Boolean)
+          .join(" · "),
+      ),
       { x: MARGIN, y: 19, size: 8, font, color: MUTED },
     );
   }

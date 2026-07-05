@@ -1,5 +1,8 @@
 # Gestionnaire St-Amour du Vert
 
+[![Netlify Status — gestionnaire](https://api.netlify.com/api/v1/badges/b5ef1f7c-c8bf-4e55-a515-4bc19199b933/deploy-status)](https://app.netlify.com/projects/mainappsav/deploys)
+[![Netlify Status — site vitrine](https://api.netlify.com/api/v1/badges/c69739ef-f7a7-4886-8997-12d00c4cd883/deploy-status)](https://app.netlify.com/projects/stamourduvert/deploys)
+
 Application web de gestion pour **St-Amour du Vert** (entretien de pelouse —
 L'Ange-Gardien, Outaouais). Interface 100 % en français, montants en CAD,
 taxes TPS/TVQ optionnelles selon la configuration. Voir `PRD.md` pour le

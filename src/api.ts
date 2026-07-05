@@ -226,6 +226,7 @@ export interface Parametres {
   companyAddress: string;
   companyEmail: string;
   companyPhone: string;
+  companyWebsite: string;
   taxesEnabled: boolean;
   tpsRate: number;
   tvqRate: number;

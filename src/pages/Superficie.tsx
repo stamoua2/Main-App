@@ -156,14 +156,6 @@ export default function Superficie() {
           </div>
         </div>
         <div className="measure">
-          <div className="label">Superficie (m²)</div>
-          <div className="value">
-            {aireM2 > 0
-              ? aireM2.toLocaleString("fr-CA", { maximumFractionDigits: 1 })
-              : "—"}
-          </div>
-        </div>
-        <div className="measure">
           <div className="label">Points tracés</div>
           <div className="value">{sommets.length}</div>
         </div>
