@@ -102,7 +102,13 @@ describe("commandes fournisseurs", () => {
       },
     });
     expect(order.status).toBe(201);
-    expect(order.body.commande.totalCents).toBe(5 * 8500 + 12000);
+    // Sous-total 545 $ + livraison 45 $ (défaut) = 590 $, puis TPS 5 % et
+    // TVQ 9,975 % sur le tout : 590 + 29,50 + 58,85 = 678,35 $.
+    const sousTotal = 5 * 8500 + 12000;
+    const taxable = sousTotal + 4500;
+    expect(order.body.commande.totalCents).toBe(
+      taxable + Math.round(taxable * 0.05) + Math.round(taxable * 0.09975),
+    );
 
     const received = await api("POST", `/api/orders/${order.body.commande.id}/receive`, { cookie });
     expect(received.status).toBe(200);

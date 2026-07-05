@@ -7,6 +7,7 @@ interface Dashboard {
   clientsActifs: number;
   prospects: number;
   estimationsEnCours: number;
+  contratsActifs: number;
   facturesImpayees: number;
   visitesAujourdhui: number;
   notificationsNonLues: number;
@@ -58,6 +59,10 @@ export default function TableauDeBord() {
         <div className="panel stat">
           <div className="label">Estimations en cours</div>
           <div className="value">{data.estimationsEnCours}</div>
+        </div>
+        <div className="panel stat">
+          <div className="label">Contrats actifs</div>
+          <div className="value">{data.contratsActifs}</div>
         </div>
         <div className="panel stat">
           <div className="label">Factures impayées</div>

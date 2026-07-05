@@ -26,8 +26,14 @@ export default function NouveauDocument() {
   const [forfaits, setForfaits] = useState<Forfait[]>([]);
   const [parametres, setParametres] = useState<Parametres | null>(null);
   const [clientId, setClientId] = useState(searchParams.get("client") ?? "");
+  const [kind, setKind] = useState<"estimation" | "facture">(
+    searchParams.get("type") === "facture" ? "facture" : "estimation",
+  );
   const [taxesActives, setTaxesActives] = useState<boolean | null>(null);
   const [acompte, setAcompte] = useState("");
+  // L'acompte suit automatiquement le % des paramètres tant qu'il n'a pas
+  // été modifié à la main (toujours ajustable).
+  const [acompteManuel, setAcompteManuel] = useState(false);
   const [notes, setNotes] = useState("");
   const [lignes, setLignes] = useState<LigneEdition[]>([{ ...LIGNE_VIDE }]);
   const [erreur, setErreur] = useState("");
@@ -64,6 +70,15 @@ export default function NouveauDocument() {
     [lignesValides, taxes, parametres, acompte],
   );
 
+  const pctAcompte = parametres?.depositPct ?? 50;
+  const acompteAutoCents = Math.round((totaux.totalCents * pctAcompte) / 100 / 100) * 100;
+
+  useEffect(() => {
+    if (!acompteManuel) {
+      setAcompte(acompteAutoCents > 0 ? (acompteAutoCents / 100).toFixed(2).replace(".", ",") : "");
+    }
+  }, [acompteAutoCents, acompteManuel]);
+
   function modifierLigne(i: number, patch: Partial<LigneEdition>) {
     setLignes((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   }
@@ -93,7 +108,7 @@ export default function NouveauDocument() {
     setEnCours(true);
     try {
       const r = await api.post<{ document: DocumentFacturation }>("/api/documents", {
-        kind: "estimation",
+        kind,
         clientId: Number(clientId),
         taxesEnabled: taxes,
         depositCents: parseCadToCents(acompte || "0"),
@@ -113,7 +128,7 @@ export default function NouveauDocument() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Facturation</div>
-          <h1>Nouvelle estimation</h1>
+          <h1>{kind === "facture" ? "Nouvelle facture" : "Nouvelle estimation"}</h1>
         </div>
       </div>
 
@@ -132,13 +147,32 @@ export default function NouveauDocument() {
               </select>
             </label>
             <label className="field">
-              Acompte demandé ($)
+              Type de document
+              <select value={kind} onChange={(e) => setKind(e.target.value as "estimation" | "facture")}>
+                <option value="estimation">Estimation</option>
+                <option value="facture">Facture (ex. : service supplémentaire)</option>
+              </select>
+            </label>
+            <label className="field">
+              Acompte demandé ($) — auto : {pctAcompte.toLocaleString("fr-CA")} % du total
               <input
                 value={acompte}
-                onChange={(e) => setAcompte(e.target.value)}
+                onChange={(e) => {
+                  setAcompteManuel(true);
+                  setAcompte(e.target.value);
+                }}
                 placeholder="0,00"
                 inputMode="decimal"
               />
+              {acompteManuel && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => setAcompteManuel(false)}
+                >
+                  Revenir au calcul automatique ({pctAcompte.toLocaleString("fr-CA")} %)
+                </button>
+              )}
             </label>
             <label className="field check" style={{ alignSelf: "end" }}>
               <input
@@ -254,7 +288,7 @@ export default function NouveauDocument() {
           {erreur && <div className="error-text">{erreur}</div>}
           <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
             <button className="btn" type="submit" disabled={enCours}>
-              {enCours ? "Création…" : "Créer l'estimation"}
+              {enCours ? "Création…" : kind === "facture" ? "Créer la facture" : "Créer l'estimation"}
             </button>
           </div>
         </div>

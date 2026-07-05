@@ -5,7 +5,7 @@ import { formatCad } from "../../shared/money";
 
 export default function Documents() {
   const [documents, setDocuments] = useState<DocumentFacturation[]>([]);
-  const [filtre, setFiltre] = useState<"" | "estimation" | "facture">("");
+  const [filtre, setFiltre] = useState<"" | "estimation" | "contrat" | "facture">("");
 
   useEffect(() => {
     api
@@ -20,7 +20,7 @@ export default function Documents() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Facturation</div>
-          <h1>Estimations & factures</h1>
+          <h1>Estimations, contrats & factures</h1>
         </div>
         <Link className="btn" to="/documents/nouveau">
           + Nouvelle estimation
@@ -32,6 +32,7 @@ export default function Documents() {
           {([
             ["", "Tous"],
             ["estimation", "Estimations"],
+            ["contrat", "Contrats"],
             ["facture", "Factures"],
           ] as const).map(([value, label]) => (
             <button
@@ -60,7 +61,7 @@ export default function Documents() {
                 <td>
                   <Link to={`/documents/${d.id}`}>{d.number}</Link>
                 </td>
-                <td>{d.kind === "estimation" ? "Estimation" : "Facture"}</td>
+                <td>{d.kind === "estimation" ? "Estimation" : d.kind === "contrat" ? "Contrat" : "Facture"}</td>
                 <td>{d.clientName}</td>
                 <td>{d.issuedOn}</td>
                 <td>

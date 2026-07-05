@@ -24,6 +24,7 @@ interface Revenu {
   label: string;
   amountCents: number;
   receivedOn: string;
+  source: string;
 }
 
 function debutDuMois(): string {
@@ -43,6 +44,8 @@ export default function Finances() {
   const [erreur, setErreur] = useState("");
   const [nouvelleDepense, setNouvelleDepense] = useState({ label: "", category: "produits", montant: "", date: aujourdhui() });
   const [nouveauRevenu, setNouveauRevenu] = useState({ label: "", montant: "", date: aujourdhui() });
+  const [syncEnCours, setSyncEnCours] = useState(false);
+  const [messageSync, setMessageSync] = useState("");
 
   const charger = useCallback(async () => {
     const [r, d, rev] = await Promise.all([
@@ -73,6 +76,27 @@ export default function Finances() {
       await charger();
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Erreur.");
+    }
+  }
+
+  // Récupère les paiements encaissés dans Square (idempotent : chaque
+  // paiement n'est compté qu'une seule fois).
+  async function synchroniserSquare() {
+    setErreur("");
+    setMessageSync("");
+    setSyncEnCours(true);
+    try {
+      const r = await api.post<{ paiements: number; nouveauxRevenus: number }>(
+        "/api/finances/sync-square",
+      );
+      setMessageSync(
+        `${r.paiements} paiement(s) Square vérifié(s) — ${r.nouveauxRevenus} nouveau(x) revenu(s) importé(s).`,
+      );
+      await charger();
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Synchronisation Square impossible.");
+    } finally {
+      setSyncEnCours(false);
     }
   }
 
@@ -190,11 +214,17 @@ export default function Finances() {
         </div>
 
         <div className="panel">
-          <h2>Revenus manuels</h2>
+          <h2>Revenus</h2>
           <p style={{ color: "var(--muted)", fontSize: 13 }}>
-            Les factures payées comptent automatiquement comme revenus; ajoutez ici les
-            encaissements hors facturation.
+            Les factures payées comptent automatiquement comme revenus. « Synchroniser
+            Square » importe aussi les paiements encaissés directement dans Square.
           </p>
+          <div className="toolbar" style={{ marginBottom: 12 }}>
+            <button className="btn secondary" onClick={synchroniserSquare} disabled={syncEnCours}>
+              {syncEnCours ? "Synchronisation…" : "Synchroniser Square"}
+            </button>
+          </div>
+          {messageSync && <div className="ok-text">{messageSync}</div>}
           <form onSubmit={ajouterRevenu} style={{ marginBottom: 14 }}>
             <div className="form-grid">
               <label className="field" style={{ gridColumn: "span 2" }}>
@@ -219,7 +249,9 @@ export default function Finances() {
               {revenus.slice(0, 12).map((r) => (
                 <tr key={r.id}>
                   <td>{r.receivedOn}</td>
-                  <td>{r.label}</td>
+                  <td>
+                    {r.label} {r.source === "square" && <span className="chip">Square</span>}
+                  </td>
                   <td className="num">{formatCad(r.amountCents)}</td>
                 </tr>
               ))}

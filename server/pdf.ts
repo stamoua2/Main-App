@@ -20,7 +20,7 @@ const PAGE_H = 792;
 const MARGIN = 44;
 
 export interface PdfDocumentData {
-  kind: "estimation" | "facture";
+  kind: "estimation" | "contrat" | "facture";
   number: string;
   issuedOn: string; // AAAA-MM-JJ
   status: string;
@@ -136,7 +136,8 @@ export async function generateDocumentPdf(data: PdfDocumentData): Promise<Uint8A
   const page = doc.addPage([PAGE_W, PAGE_H]);
   const ctx: Ctx = { doc, page, font, bold, y: 0 };
 
-  const title = data.kind === "estimation" ? "ESTIMATION" : "FACTURE";
+  const title =
+    data.kind === "estimation" ? "ESTIMATION" : data.kind === "contrat" ? "CONTRAT" : "FACTURE";
   doc.setTitle(`${title} ${data.number} — ${data.company.name}`);
   doc.setLanguage("fr-CA");
 
@@ -303,7 +304,9 @@ export async function generateDocumentPdf(data: PdfDocumentData): Promise<Uint8A
     const thanks =
       data.kind === "estimation"
         ? "Merci de votre confiance ! Demandez-nous toute modification : on ajuste le programme à votre terrain."
-        : "Merci de faire confiance à St-Amour du Vert pour l'entretien de votre pelouse !";
+        : data.kind === "contrat"
+          ? "Ce contrat couvre le programme d'entretien de la saison. Le paiement de l'acompte confirme votre inscription."
+          : "Merci de faire confiance à St-Amour du Vert pour l'entretien de votre pelouse !";
     p.drawText(sanitize(thanks), { x: MARGIN, y: 34, size: 9, font, color: GREEN_FOREST });
     p.drawText(
       sanitize(

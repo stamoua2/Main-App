@@ -13,6 +13,9 @@ import { ALEX, api, freshSeededDb, login } from "./helpers.js";
 
 let cookie: string;
 let invoiceDocId: number;
+let estimateDocId: number;
+let invoiceSquareId: string;
+let invoiceCounter = 0;
 const squareCalls: { method: string; path: string; body: any }[] = [];
 
 // Simulation minimale de l'API Square (customers → orders → invoices → publish).
@@ -36,20 +39,25 @@ function fakeSquareFetch(): typeof fetch {
       return respond({ order: { id: "ORDER_1", total_money: { amount: 123483, currency: "CAD" } } });
     }
     if (path === "/v2/invoices" && method === "POST") {
-      return respond({ invoice: { id: "inv:TEST-0001", version: 0, status: "DRAFT" } });
+      invoiceCounter++;
+      return respond({
+        invoice: { id: `inv:TEST-${String(invoiceCounter).padStart(4, "0")}`, version: 0, status: "DRAFT" },
+      });
     }
-    if (path === "/v2/invoices/inv:TEST-0001/publish") {
+    const publishMatch = path.match(/^\/v2\/invoices\/(.+)\/publish$/);
+    if (publishMatch) {
       return respond({
         invoice: {
-          id: "inv:TEST-0001",
+          id: decodeURIComponent(publishMatch[1]),
           version: 1,
           status: "UNPAID",
-          public_url: "https://squareup.com/pay-invoice/inv-test-0001",
+          public_url: "https://squareup.com/pay-invoice/inv-test",
         },
       });
     }
-    if (path === "/v2/invoices/inv:TEST-0001" && method === "GET") {
-      return respond({ invoice: { id: "inv:TEST-0001", version: 2, status: "PAID" } });
+    const getMatch = path.match(/^\/v2\/invoices\/([^/]+)$/);
+    if (getMatch && method === "GET") {
+      return respond({ invoice: { id: decodeURIComponent(getMatch[1]), version: 2, status: "PAID" } });
     }
     return respond({ errors: [{ code: "NOT_FOUND", detail: `non simulé : ${method} ${path}` }] }, 404);
   }) as typeof fetch;
@@ -82,6 +90,7 @@ beforeAll(async () => {
       lines: [{ description: "TEST Square — ne pas payer", quantity: 1, unitPriceCents: 107400 }],
     },
   });
+  estimateDocId = est.body.document.id;
   const converted = await api("POST", `/api/documents/${est.body.document.id}/convert`, { cookie });
   invoiceDocId = converted.body.document.id;
 });
@@ -89,16 +98,20 @@ beforeAll(async () => {
 afterAll(() => setSquareFetchForTests(null));
 
 describe("synchronisation Square — sortante", () => {
-  it("refuse d'envoyer une estimation (factures seulement)", async () => {
-    const docs = await api("GET", "/api/documents?type=estimation", { cookie });
-    const res = await api("POST", `/api/documents/${docs.body.documents[0].id}/square`, { cookie });
-    expect(res.status).toBe(400);
+  it("envoie une estimation en BROUILLON Square (créée, jamais publiée)", async () => {
+    const res = await api("POST", `/api/documents/${estimateDocId}/square`, { cookie });
+    expect(res.status).toBe(201);
+    expect(res.body.square.status).toBe("DRAFT");
+    expect(res.body.square.publicUrl).toBeNull();
+    // Aucune publication pour une estimation
+    const publishCalls = squareCalls.filter((c) => c.path.endsWith("/publish"));
+    expect(publishCalls).toHaveLength(0);
   });
 
   it("pousse une facture : client → commande → facture → publication", async () => {
     const res = await api("POST", `/api/documents/${invoiceDocId}/square`, { cookie });
     expect(res.status).toBe(201);
-    expect(res.body.square.squareInvoiceId).toBe("inv:TEST-0001");
+    invoiceSquareId = res.body.square.squareInvoiceId;
     expect(res.body.square.status).toBe("UNPAID");
     expect(res.body.square.publicUrl).toContain("squareup.com/pay-invoice");
 
@@ -107,7 +120,7 @@ describe("synchronisation Square — sortante", () => {
     expect(paths).toContain("POST /v2/customers");
     expect(paths).toContain("POST /v2/orders");
     expect(paths).toContain("POST /v2/invoices");
-    expect(paths).toContain("POST /v2/invoices/inv:TEST-0001/publish");
+    expect(paths).toContain(`POST /v2/invoices/${invoiceSquareId}/publish`);
 
     // La commande porte les taxes TPS/TVQ en pourcentage
     const order = squareCalls.find((c) => c.path === "/v2/orders")!.body.order;
@@ -115,15 +128,15 @@ describe("synchronisation Square — sortante", () => {
       { name: "TPS", percentage: "5", scope: "ORDER" },
       { name: "TVQ", percentage: "9.975", scope: "ORDER" },
     ]);
-    // L'acompte devient une demande de paiement DEPOSIT
-    const invoice = squareCalls.find((c) => c.path === "/v2/invoices")!.body.invoice;
+    // L'acompte devient une demande de paiement DEPOSIT (dernier envoi = facture)
+    const invoice = squareCalls.filter((c) => c.path === "/v2/invoices").pop()!.body.invoice;
     expect(invoice.payment_requests[0].request_type).toBe("DEPOSIT");
     expect(invoice.payment_requests[0].fixed_amount_requested_money.amount).toBe(20000);
     expect(invoice.delivery_method).toBe("SHARE_MANUALLY");
 
     // Le document local est lié
     const doc = await api("GET", `/api/documents/${invoiceDocId}`, { cookie });
-    expect(doc.body.document.squareInvoiceId).toBe("inv:TEST-0001");
+    expect(doc.body.document.squareInvoiceId).toBe(invoiceSquareId);
     expect(doc.body.document.squarePaymentStatus).toBe("UNPAID");
   });
 
@@ -138,24 +151,25 @@ describe("synchronisation Square — entrante (webhook)", () => {
   const SIGNATURE_KEY = "cle-webhook-de-test";
 
   // Charge utile conforme à la documentation Square (invoice.payment_made).
-  const paymentEvent = {
+  // invoiceSquareId est rempli par le test d'envoi de la facture ci-dessus.
+  const paymentEvent = () => ({
     merchant_id: "ML5SSNY97FR20",
     type: "invoice.payment_made",
     event_id: "e7d90c05-0000-4000-8000-000000000001",
     created_at: new Date().toISOString(),
     data: {
       type: "invoice",
-      id: "inv:TEST-0001",
+      id: invoiceSquareId,
       object: {
         invoice: {
-          id: "inv:TEST-0001",
+          id: invoiceSquareId,
           version: 3,
           status: "PAID",
           invoice_number: "FAC-2026-0001",
         },
       },
     },
-  };
+  });
 
   function signedRequest(body: string, signature?: string): Request {
     return new Request(NOTIFICATION_URL, {
@@ -171,7 +185,7 @@ describe("synchronisation Square — entrante (webhook)", () => {
   }
 
   it("vérifie la signature HMAC selon la spécification Square", () => {
-    const body = JSON.stringify(paymentEvent);
+    const body = JSON.stringify(paymentEvent());
     const good = createHmac("sha256", SIGNATURE_KEY).update(NOTIFICATION_URL + body).digest("base64");
     expect(verifySquareSignature(NOTIFICATION_URL, body, good, SIGNATURE_KEY)).toBe(true);
     expect(verifySquareSignature(NOTIFICATION_URL, body, "fausse-signature", SIGNATURE_KEY)).toBe(false);
@@ -179,7 +193,7 @@ describe("synchronisation Square — entrante (webhook)", () => {
   });
 
   it("rejette un webhook mal signé (401)", async () => {
-    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent), "signature-invalide"));
+    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent()), "signature-invalide"));
     expect(res.status).toBe(401);
   });
 
@@ -189,7 +203,7 @@ describe("synchronisation Square — entrante (webhook)", () => {
   });
 
   it("webhook invoice.payment_made signé → statut « payée » + notification", async () => {
-    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent)));
+    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent())));
     expect(res.status).toBe(200);
     const result = await res.json();
     expect(result.processed).toBe(true);
@@ -204,7 +218,7 @@ describe("synchronisation Square — entrante (webhook)", () => {
   });
 
   it("rejoue le même event_id sans double traitement (idempotence)", async () => {
-    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent)));
+    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentEvent())));
     const result = await res.json();
     expect(result.processed).toBe(false);
     expect(result.detail).toContain("idempotence");

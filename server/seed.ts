@@ -43,6 +43,12 @@ export async function importOjCatalog(db: Db): Promise<{ inserted: number; updat
       inserted++;
     }
   }
+  // Alimente la liste de catégories gérable (menu déroulant de l'inventaire).
+  await db.query(
+    `INSERT INTO product_categories (name)
+     SELECT DISTINCT category FROM inventory_items WHERE category <> ''
+     ON CONFLICT (name) DO NOTHING`,
+  );
   return { inserted, updated, total: OJ_CATALOG.length };
 }
 

@@ -36,6 +36,7 @@ const NAV = [
 export default function App() {
   const [utilisateur, setUtilisateur] = useState<Utilisateur | null>(null);
   const [chargement, setChargement] = useState(true);
+  const [menuOuvert, setMenuOuvert] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -67,12 +68,34 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">St-Amour du Vert</div>
-        <div className="brand-sub">Gestionnaire</div>
+      <aside className={`sidebar${menuOuvert ? " menu-open" : ""}`}>
+        <div>
+          <div className="brand">St-Amour du Vert</div>
+          <div className="brand-sub">Gestionnaire</div>
+        </div>
+        <button
+          className="nav-toggle"
+          aria-label={menuOuvert ? "Fermer le menu" : "Ouvrir le menu"}
+          onClick={() => setMenuOuvert((v) => !v)}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            {menuOuvert ? (
+              <>
+                <line x1="5" y1="5" x2="19" y2="19" />
+                <line x1="19" y1="5" x2="5" y2="19" />
+              </>
+            ) : (
+              <>
+                <line x1="4" y1="7" x2="20" y2="7" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <line x1="4" y1="17" x2="20" y2="17" />
+              </>
+            )}
+          </svg>
+        </button>
         <nav>
           {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.to === "/"}>
+            <NavLink key={item.to} to={item.to} end={item.to === "/"} onClick={() => setMenuOuvert(false)}>
               <span className="num">{item.num}</span>
               {item.label}
             </NavLink>

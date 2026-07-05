@@ -66,6 +66,7 @@ export default function Parametres() {
         companyEmail: parametres.companyEmail,
         companyWebsite: parametres.companyWebsite,
         companyAddress: parametres.companyAddress,
+        depositPct: parametres.depositPct,
       });
       setParametres(r.parametres);
       setMessageTaxes("Paramètres sauvegardés.");
@@ -154,6 +155,16 @@ export default function Parametres() {
                 value={parametres.tvqNumber}
                 onChange={(e) => setParametres({ ...parametres, tvqNumber: e.target.value })}
                 placeholder="1234567890 TQ0001"
+              />
+            </label>
+            <label className="field">
+              Acompte par défaut (% du total)
+              <input
+                value={String(parametres.depositPct)}
+                onChange={(e) =>
+                  setParametres({ ...parametres, depositPct: Number(e.target.value.replace(",", ".")) || 0 })
+                }
+                inputMode="decimal"
               />
             </label>
           </div>

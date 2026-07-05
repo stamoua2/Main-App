@@ -1,19 +1,33 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, type DocumentFacturation } from "../api";
+import { api, ApiError, type DocumentFacturation, type Visite } from "../api";
 import { formatCad, formatPct } from "../../shared/money";
+
+const KIND_LABELS = { estimation: "Estimation", contrat: "Contrat", facture: "Facture" } as const;
 
 export default function DetailDocument() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [doc, setDoc] = useState<DocumentFacturation | null>(null);
+  const [visites, setVisites] = useState<Visite[]>([]);
+  const [message, setMessage] = useState("");
   const [erreur, setErreur] = useState("");
   const [squareEnCours, setSquareEnCours] = useState(false);
 
   useEffect(() => {
+    setMessage("");
     api
       .get<{ document: DocumentFacturation }>(`/api/documents/${id}`)
-      .then((r) => setDoc(r.document))
+      .then((r) => {
+        setDoc(r.document);
+        if (r.document.kind === "contrat") {
+          api
+            .get<{ visites: Visite[] }>(`/api/visits?documentId=${r.document.id}`)
+            .then((v) => setVisites(v.visites));
+        } else {
+          setVisites([]);
+        }
+      })
       .catch(() => setErreur("Document introuvable."));
   }, [id]);
 
@@ -24,6 +38,22 @@ export default function DetailDocument() {
       navigate(`/documents/${r.document.id}`);
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Conversion impossible.");
+    }
+  }
+
+  // Estimation acceptée → contrat (+ visites de la saison générées).
+  async function creerContrat() {
+    if (!doc) return;
+    try {
+      const r = await api.post<{ document: DocumentFacturation; visitesGenerees: number }>(
+        `/api/documents/${doc.id}/contract`,
+      );
+      navigate(`/documents/${r.document.id}`, {
+        state: { message: `${r.visitesGenerees} visites générées au calendrier.` },
+      });
+      setMessage(`Contrat créé — ${r.visitesGenerees} visites proposées au calendrier (ajustables).`);
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Création du contrat impossible.");
     }
   }
 
@@ -68,12 +98,13 @@ export default function DetailDocument() {
   if (!doc) return <p>Chargement…</p>;
 
   const estEstimation = doc.kind === "estimation";
+  const estContrat = doc.kind === "contrat";
 
   return (
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{estEstimation ? "Estimation" : "Facture"}</div>
+          <div className="eyebrow">{KIND_LABELS[doc.kind]}</div>
           <h1>{doc.number}</h1>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -81,16 +112,32 @@ export default function DetailDocument() {
             Télécharger le PDF
           </a>
           {estEstimation && (
+            <button className="btn secondary" onClick={creerContrat}>
+              Accepter → créer le contrat
+            </button>
+          )}
+          {estEstimation && (
             <button className="btn secondary" onClick={convertir}>
               Convertir en facture
             </button>
           )}
-          {!estEstimation && !doc.squareInvoiceId && (
+          {estContrat && (
+            <Link className="btn secondary" to={`/documents/nouveau?client=${doc.clientId}&type=facture`}>
+              + Facture supplémentaire
+            </Link>
+          )}
+          {!doc.squareInvoiceId && (
             <button className="btn secondary" onClick={envoyerSquare} disabled={squareEnCours}>
-              {squareEnCours ? "Envoi…" : "Envoyer vers Square"}
+              {squareEnCours
+                ? "Envoi…"
+                : estEstimation
+                  ? "Créer le brouillon Square"
+                  : estContrat
+                    ? "Envoyer le contrat via Square"
+                    : "Envoyer vers Square"}
             </button>
           )}
-          {!estEstimation && doc.squareInvoiceId && (
+          {doc.squareInvoiceId && (
             <button className="btn secondary" onClick={synchroniserSquare} disabled={squareEnCours}>
               {squareEnCours ? "Synchronisation…" : "Synchroniser le paiement Square"}
             </button>
@@ -101,7 +148,14 @@ export default function DetailDocument() {
         </div>
       </div>
 
+      {message && <div className="ok-text">{message}</div>}
       {erreur && <div className="error-text">{erreur}</div>}
+      {estContrat && !doc.squareInvoiceId && (
+        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: -6 }}>
+          Envoyez le contrat via Square : le client reçoit une facture avec acompte —
+          le paiement de l'acompte confirme la signature (statut « signé » automatique).
+        </p>
+      )}
 
       <div className="doc-meta">
         <span>
@@ -202,6 +256,47 @@ export default function DetailDocument() {
           </p>
         )}
       </div>
+
+      {estContrat && (
+        <div className="panel">
+          <h2>
+            Visites du contrat{" "}
+            <Link to="/calendrier" style={{ fontSize: 13, fontWeight: 500 }}>
+              Ouvrir le calendrier →
+            </Link>
+          </h2>
+          {visites.length === 0 ? (
+            <p style={{ color: "var(--muted)" }}>Aucune visite liée à ce contrat.</p>
+          ) : (
+            <div className="table-scroll">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Service</th>
+                    <th>Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visites.map((v) => (
+                    <tr key={v.id}>
+                      <td>{v.scheduledAt.slice(0, 10)}</td>
+                      <td>{v.services}</td>
+                      <td>
+                        <span className="chip">{v.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>
+            Ces visites ont été proposées automatiquement à la création du contrat —
+            déplacez-les librement dans le calendrier.
+          </p>
+        </div>
+      )}
     </>
   );
 }

@@ -285,6 +285,52 @@ export const DDL: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_package_products_pkg ON package_products(package_id)`,
 
+  // ---- Contrats ----
+  // Le cycle complet est estimation → contrat → facture(s). Le contrat est le
+  // document central : envoyé au client via Square (facture avec acompte), il
+  // porte les services de la saison et génère les visites du calendrier.
+  `ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_kind_check`,
+  `ALTER TABLE documents ADD CONSTRAINT documents_kind_check
+     CHECK (kind IN ('estimation', 'contrat', 'facture'))`,
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES packages(id) ON DELETE SET NULL`,
+  // Visites rattachées à un contrat (générées à sa création, ajustables).
+  `ALTER TABLE visits ADD COLUMN IF NOT EXISTS document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_visits_document ON visits(document_id)`,
+
+  // Acompte par défaut (% du total, ajustable document par document).
+  `ALTER TABLE settings ADD COLUMN IF NOT EXISTS deposit_pct NUMERIC(6,2) NOT NULL DEFAULT 50`,
+
+  // ---- Commandes fournisseurs : taxes et livraison ----
+  `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS subtotal_cents INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS shipping_cents INTEGER NOT NULL DEFAULT 4500`,
+  `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS taxes_enabled BOOLEAN NOT NULL DEFAULT true`,
+  `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS tps_cents INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS tvq_cents INTEGER NOT NULL DEFAULT 0`,
+
+  // ---- Catégories de produits (gérables dans l'app) ----
+  `CREATE TABLE IF NOT EXISTS product_categories (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    position INTEGER NOT NULL DEFAULT 0
+  )`,
+  // Alimente la liste avec les catégories déjà présentes dans l'inventaire.
+  `INSERT INTO product_categories (name)
+     SELECT DISTINCT category FROM inventory_items WHERE category <> ''
+     ON CONFLICT (name) DO NOTHING`,
+
+  // ---- Marketing IA ----
+  `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS objective TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS tone TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ai_prompt TEXT NOT NULL DEFAULT ''`,
+  // Image générée, stockée en data URL (base64).
+  `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS image_data TEXT NOT NULL DEFAULT ''`,
+
+  // ---- Revenus : synchronisation des paiements Square ----
+  `ALTER TABLE revenues ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manuel'`,
+  `ALTER TABLE revenues ADD COLUMN IF NOT EXISTS square_payment_id TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_revenues_square_payment
+     ON revenues(square_payment_id) WHERE square_payment_id IS NOT NULL`,
+
   `CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id)`,
   `CREATE INDEX IF NOT EXISTS idx_document_lines_doc ON document_lines(document_id)`,

@@ -140,7 +140,7 @@ export interface LigneDocument {
 
 export interface DocumentFacturation {
   id: number;
-  kind: "estimation" | "facture";
+  kind: "estimation" | "contrat" | "facture";
   number: string;
   clientId: number;
   clientName?: string;
@@ -157,6 +157,7 @@ export interface DocumentFacturation {
   balanceCents: number;
   notes: string;
   convertedFromId: number | null;
+  packageId: number | null;
   squareInvoiceId: string | null;
   squarePaymentStatus: string | null;
   squarePublicUrl: string | null;
@@ -198,6 +199,8 @@ export interface Visite {
   status: string;
   routePosition: number | null;
   notes: string;
+  documentId: number | null;
+  contractNumber: string | null;
 }
 
 export interface ArretRoute {
@@ -233,4 +236,5 @@ export interface Parametres {
   tpsNumber: string;
   tvqNumber: string;
   estimateValidityDays: number;
+  depositPct: number;
 }

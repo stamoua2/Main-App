@@ -21,6 +21,8 @@ import {
   verifySquareSignature,
 } from "./square.js";
 import { MapsError, geocodeAddress, optimizeRoute, type GeoPoint } from "./routesapi.js";
+import { GeminiError, generateAdImage, generateAdText } from "./gemini.js";
+import { listSquarePayments } from "./square.js";
 import { coutForfait, prixDepuisMarge, type ProduitApplique } from "../shared/pricing.js";
 import { M2_TO_FT2 } from "../shared/area.js";
 
@@ -103,11 +105,13 @@ const documentLineSchema = z.object({
 });
 
 const documentSchema = z.object({
-  kind: z.enum(["estimation", "facture"]).default("estimation"),
+  kind: z.enum(["estimation", "contrat", "facture"]).default("estimation"),
   clientId: z.number().int(),
+  packageId: z.number().int().nullable().optional(),
   issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   taxesEnabled: z.boolean().optional(),
-  depositCents: z.number().int().min(0).default(0),
+  // Omis → acompte automatique (deposit_pct des paramètres, 50 % par défaut).
+  depositCents: z.number().int().min(0).optional(),
   notes: z.string().default(""),
   status: z.string().optional(),
   lines: z.array(documentLineSchema).min(1, "Au moins une ligne est requise"),
@@ -125,6 +129,7 @@ const settingsSchema = z.object({
   tpsNumber: z.string().optional(),
   tvqNumber: z.string().optional(),
   estimateValidityDays: z.number().int().min(1).optional(),
+  depositPct: z.number().min(0).max(100).optional(),
 });
 
 // ---------- Aides ----------
@@ -188,6 +193,7 @@ async function getSettings() {
     tps_number: string;
     tvq_number: string;
     estimate_validity_days: number;
+    deposit_pct: string | number;
   }>("SELECT * FROM settings WHERE id = 1");
   const s = rows[0];
   return {
@@ -202,12 +208,13 @@ async function getSettings() {
     tpsNumber: s.tps_number,
     tvqNumber: s.tvq_number,
     estimateValidityDays: s.estimate_validity_days,
+    depositPct: Number(s.deposit_pct),
   };
 }
 
-async function nextDocumentNumber(kind: "estimation" | "facture"): Promise<string> {
+async function nextDocumentNumber(kind: "estimation" | "contrat" | "facture"): Promise<string> {
   const db = await getDb();
-  const prefix = kind === "estimation" ? "EST" : "FAC";
+  const prefix = kind === "estimation" ? "EST" : kind === "contrat" ? "CON" : "FAC";
   const year = new Date().getFullYear();
   const { rows } = await db.query<{ number: string }>(
     "SELECT number FROM documents WHERE number LIKE $1 ORDER BY number DESC LIMIT 1",
@@ -220,7 +227,7 @@ async function nextDocumentNumber(kind: "estimation" | "facture"): Promise<strin
 
 interface DocumentRow {
   id: number;
-  kind: "estimation" | "facture";
+  kind: "estimation" | "contrat" | "facture";
   number: string;
   client_id: number;
   status: string;
@@ -270,6 +277,7 @@ function documentToJson(row: DocumentRow, lines?: unknown[]) {
     balanceCents: row.balance_cents,
     notes: row.notes,
     convertedFromId: row.converted_from_id,
+    packageId: (row as unknown as { package_id: number | null }).package_id ?? null,
     squareInvoiceId: row.square_invoice_id ?? null,
     squarePaymentStatus: row.square_payment_status ?? null,
     squarePublicUrl: row.square_public_url ?? null,
@@ -486,6 +494,7 @@ route("PUT", "/api/settings", async (req) => {
     ["tps_number", d.tpsNumber],
     ["tvq_number", d.tvqNumber],
     ["estimate_validity_days", d.estimateValidityDays],
+    ["deposit_pct", d.depositPct],
   ];
   for (const [col, val] of map) {
     if (val !== undefined) {
@@ -884,21 +893,31 @@ async function insertDocument(
 
   const settings = await getSettings();
   const taxesEnabled = data.taxesEnabled ?? settings.taxesEnabled;
+  // Acompte : montant fourni tel quel, sinon automatique (% des paramètres,
+  // arrondi au dollar), toujours ajustable manuellement dans l'interface.
+  const base = computeTotals(data.lines, {
+    taxesEnabled,
+    tpsRate: settings.tpsRate,
+    tvqRate: settings.tvqRate,
+  });
+  const autoDeposit = Math.round((base.totalCents * settings.depositPct) / 100 / 100) * 100;
   const totals = computeTotals(data.lines, {
     taxesEnabled,
     tpsRate: settings.tpsRate,
     tvqRate: settings.tvqRate,
-    depositCents: data.depositCents,
+    depositCents: data.depositCents ?? autoDeposit,
   });
   const number = await nextDocumentNumber(data.kind);
-  const status = data.status ?? (data.kind === "estimation" ? "brouillon" : "à payer");
+  const status =
+    data.status ??
+    (data.kind === "estimation" ? "brouillon" : data.kind === "contrat" ? "brouillon" : "à payer");
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO documents (kind, number, client_id, status, issued_on, taxes_enabled,
+    `INSERT INTO documents (kind, number, client_id, package_id, status, issued_on, taxes_enabled,
        tps_rate, tvq_rate, subtotal_cents, tps_cents, tvq_cents, total_cents,
        deposit_cents, balance_cents, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
     [
-      data.kind, number, data.clientId, status,
+      data.kind, number, data.clientId, data.packageId ?? null, status,
       data.issuedOn ?? new Date().toISOString().slice(0, 10),
       taxesEnabled, settings.tpsRate, settings.tvqRate,
       totals.subtotalCents, totals.tpsCents, totals.tvqCents, totals.totalCents,
@@ -945,46 +964,62 @@ route("DELETE", "/api/documents/:id", async (_req, params) => {
   return json({ ok: true, supprime: Number(params.id) });
 });
 
-// Conversion estimation → facture
-route("POST", "/api/documents/:id/convert", async (_req, params) => {
+// Duplication d'un document vers un autre type (copie des lignes/totaux).
+async function duplicateDocument(
+  sourceId: number,
+  toKind: "contrat" | "facture",
+  sourceStatusAfter: string,
+): Promise<number | null> {
   const db = await getDb();
-  const loaded = await loadDocument(Number(params.id));
-  if (!loaded) return error("Document introuvable.", 404);
-  if (loaded.row.kind !== "estimation") {
-    return error("Seule une estimation peut être convertie en facture.", 400);
-  }
-  const number = await nextDocumentNumber("facture");
+  const loaded = await loadDocument(sourceId);
+  if (!loaded) return null;
+  const number = await nextDocumentNumber(toKind);
+  const initialStatus = toKind === "contrat" ? "brouillon" : "à payer";
+  const { rows: clientPkg } = await db.query<{ package_id: number | null }>(
+    "SELECT package_id FROM clients WHERE id = $1",
+    [loaded.row.client_id],
+  );
+  const packageId =
+    (loaded.row as unknown as { package_id: number | null }).package_id ??
+    clientPkg[0]?.package_id ??
+    null;
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO documents (kind, number, client_id, status, issued_on, taxes_enabled,
+    `INSERT INTO documents (kind, number, client_id, package_id, status, issued_on, taxes_enabled,
        tps_rate, tvq_rate, subtotal_cents, tps_cents, tvq_cents, total_cents,
        deposit_cents, balance_cents, notes, converted_from_id)
-     VALUES ('facture', $1, $2, 'à payer', CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING id`,
     [
-      number, loaded.row.client_id, loaded.row.taxes_enabled,
-      loaded.row.tps_rate, loaded.row.tvq_rate,
+      toKind, number, loaded.row.client_id, packageId, initialStatus,
+      loaded.row.taxes_enabled, loaded.row.tps_rate, loaded.row.tvq_rate,
       loaded.row.subtotal_cents, loaded.row.tps_cents, loaded.row.tvq_cents,
       loaded.row.total_cents, loaded.row.deposit_cents, loaded.row.balance_cents,
       loaded.row.notes, loaded.row.id,
     ],
   );
-  const invoiceId = rows[0].id;
+  const newId = rows[0].id;
   for (const line of loaded.lines) {
     await db.query(
       `INSERT INTO document_lines (document_id, position, description, quantity, unit_price_cents, amount_cents)
        VALUES ($1,$2,$3,$4,$5,$6)`,
-      [invoiceId, line.position, line.description, Number(line.quantity), line.unit_price_cents, line.amount_cents],
+      [newId, line.position, line.description, Number(line.quantity), line.unit_price_cents, line.amount_cents],
     );
   }
-  await db.query("UPDATE documents SET status = 'acceptée', updated_at = now() WHERE id = $1", [
-    loaded.row.id,
+  await db.query("UPDATE documents SET status = $1, updated_at = now() WHERE id = $2", [
+    sourceStatusAfter,
+    sourceId,
   ]);
-  const invoice = await loadDocument(invoiceId);
+  return newId;
+}
+
+async function documentResponse(id: number, status = 200): Promise<Response> {
+  const loaded = await loadDocument(id);
+  if (!loaded) return error("Document introuvable.", 404);
   return json(
     {
       document: documentToJson(
-        invoice!.row,
-        invoice!.lines.map((l) => ({
+        loaded.row,
+        loaded.lines.map((l) => ({
           id: l.id,
           description: l.description,
           quantity: Number(l.quantity),
@@ -993,8 +1028,80 @@ route("POST", "/api/documents/:id/convert", async (_req, params) => {
         })),
       ),
     },
-    201,
+    status,
   );
+}
+
+// Saison d'entretien : les visites d'un contrat sont réparties du 1er mai au
+// 15 octobre (ou à partir de la semaine prochaine si la saison est entamée).
+export async function generateContractVisits(contractId: number): Promise<number> {
+  const db = await getDb();
+  const { rows: docs } = await db.query<{
+    id: number; kind: string; client_id: number; package_id: number | null; number: string;
+  }>("SELECT id, kind, client_id, package_id, number FROM documents WHERE id = $1", [contractId]);
+  const doc = docs[0];
+  if (!doc || doc.kind !== "contrat") return 0;
+  const { rows: pkgRows } = await db.query<{ name: string; visit_count: number }>(
+    `SELECT p.name, p.visit_count FROM packages p WHERE p.id = COALESCE(
+       $1, (SELECT package_id FROM clients WHERE id = $2))`,
+    [doc.package_id, doc.client_id],
+  );
+  const visitCount = pkgRows[0]?.visit_count || 4;
+  const pkgName = pkgRows[0]?.name ?? "";
+
+  const year = new Date().getFullYear();
+  const seasonStart = new Date(Date.UTC(year, 4, 1, 13, 0, 0)); // 1er mai, 9 h (HAE)
+  const seasonEnd = new Date(Date.UTC(year, 9, 15, 13, 0, 0)); // 15 octobre
+  let start = seasonStart;
+  const nextWeek = new Date(Date.now() + 7 * 86400000);
+  if (nextWeek > start) start = nextWeek;
+  if (start >= seasonEnd) start = seasonStart; // saison passée : planifie l'an type
+
+  const stepMs = visitCount > 1 ? (seasonEnd.getTime() - start.getTime()) / (visitCount - 1) : 0;
+  for (let i = 0; i < visitCount; i++) {
+    const when = new Date(start.getTime() + stepMs * i);
+    when.setUTCHours(13, 0, 0, 0);
+    await db.query(
+      `INSERT INTO visits (client_id, scheduled_at, duration_minutes, services, status, notes, document_id)
+       VALUES ($1,$2,$3,$4,'planifiee',$5,$6)`,
+      [
+        doc.client_id,
+        when.toISOString(),
+        45,
+        pkgName ? `Forfait ${pkgName} — visite ${i + 1}/${visitCount}` : `Visite ${i + 1}/${visitCount}`,
+        `Générée automatiquement par le contrat ${doc.number}. Ajustez la date au besoin.`,
+        contractId,
+      ],
+    );
+  }
+  return visitCount;
+}
+
+// Conversion estimation → facture (directe, sans contrat)
+route("POST", "/api/documents/:id/convert", async (_req, params) => {
+  const loaded = await loadDocument(Number(params.id));
+  if (!loaded) return error("Document introuvable.", 404);
+  if (loaded.row.kind === "facture") {
+    return error("Ce document est déjà une facture.", 400);
+  }
+  const newId = await duplicateDocument(Number(params.id), "facture", "acceptée");
+  if (newId === null) return error("Document introuvable.", 404);
+  return documentResponse(newId, 201);
+});
+
+// Estimation acceptée → CONTRAT (+ visites de la saison générées).
+route("POST", "/api/documents/:id/contract", async (_req, params) => {
+  const loaded = await loadDocument(Number(params.id));
+  if (!loaded) return error("Document introuvable.", 404);
+  if (loaded.row.kind !== "estimation") {
+    return error("Seule une estimation peut devenir un contrat.", 400);
+  }
+  const newId = await duplicateDocument(Number(params.id), "contrat", "acceptée");
+  if (newId === null) return error("Document introuvable.", 404);
+  const visites = await generateContractVisits(newId);
+  const res = await documentResponse(newId, 201);
+  const payload = await res.json();
+  return json({ ...payload, visitesGenerees: visites }, 201);
 });
 
 // PDF
@@ -1073,6 +1180,9 @@ route("GET", "/api/dashboard", async () => {
   const facturesImpayees = await count(
     "SELECT count(*) AS n FROM documents WHERE kind = 'facture' AND status != 'payée'",
   );
+  const contratsActifs = await count(
+    "SELECT count(*) AS n FROM documents WHERE kind = 'contrat' AND status IN ('envoyé', 'signé')",
+  );
   const { rows: recents } = await db.query<DocumentRow>(
     `SELECT d.*, (c.first_name || ' ' || c.last_name) AS client_name
      FROM documents d JOIN clients c ON c.id = d.client_id ORDER BY d.id DESC LIMIT 6`,
@@ -1115,6 +1225,7 @@ route("GET", "/api/dashboard", async () => {
     clientsActifs,
     prospects,
     estimationsEnCours,
+    contratsActifs,
     facturesImpayees,
     visitesAujourdhui: Number(todaysVisits[0].n),
     notificationsNonLues: Number(unread[0].n),
@@ -1285,6 +1396,7 @@ const visitSchema = z.object({
   services: z.string().default(""),
   status: z.enum(["planifiee", "faite", "annulee"]).default("planifiee"),
   notes: z.string().default(""),
+  documentId: z.number().int().nullable().optional(),
 });
 
 interface VisitRow {
@@ -1301,6 +1413,8 @@ interface VisitRow {
   city?: string;
   latitude?: number | null;
   longitude?: number | null;
+  document_id?: number | null;
+  contract_number?: string | null;
 }
 
 function visitToJson(row: VisitRow) {
@@ -1318,23 +1432,32 @@ function visitToJson(row: VisitRow) {
     status: row.status,
     routePosition: row.route_position,
     notes: row.notes,
+    documentId: row.document_id ?? null,
+    contractNumber: row.contract_number ?? null,
   };
 }
 
 const VISIT_SELECT = `SELECT v.*, (c.first_name || ' ' || c.last_name) AS client_name,
-    c.address_line, c.city, c.latitude, c.longitude
-  FROM visits v JOIN clients c ON c.id = v.client_id`;
+    c.address_line, c.city, c.latitude, c.longitude, d.number AS contract_number
+  FROM visits v JOIN clients c ON c.id = v.client_id
+  LEFT JOIN documents d ON d.id = v.document_id`;
 
 route("GET", "/api/visits", async (req) => {
   const db = await getDb();
   const url = new URL(req.url);
   const date = url.searchParams.get("date");
+  const documentId = Number(url.searchParams.get("documentId")) || 0;
   const { rows } = date
     ? await db.query<VisitRow>(
         `${VISIT_SELECT} WHERE v.scheduled_at::date = $1::date ORDER BY v.scheduled_at`,
         [date],
       )
-    : await db.query<VisitRow>(`${VISIT_SELECT} ORDER BY v.scheduled_at DESC LIMIT 100`);
+    : documentId
+      ? await db.query<VisitRow>(
+          `${VISIT_SELECT} WHERE v.document_id = $1 ORDER BY v.scheduled_at`,
+          [documentId],
+        )
+      : await db.query<VisitRow>(`${VISIT_SELECT} ORDER BY v.scheduled_at DESC LIMIT 200`);
   return json({ visites: rows.map(visitToJson) });
 });
 
@@ -1346,9 +1469,9 @@ route("POST", "/api/visits", async (req) => {
   const { rows: clientRows } = await db.query("SELECT id FROM clients WHERE id = $1", [d.clientId]);
   if (!clientRows.length) return error("Client introuvable.", 404);
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO visits (client_id, scheduled_at, duration_minutes, services, status, notes)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [d.clientId, d.scheduledAt, d.durationMinutes, d.services, d.status, d.notes],
+    `INSERT INTO visits (client_id, scheduled_at, duration_minutes, services, status, notes, document_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [d.clientId, d.scheduledAt, d.durationMinutes, d.services, d.status, d.notes, d.documentId ?? null],
   );
   const { rows: created } = await db.query<VisitRow>(`${VISIT_SELECT} WHERE v.id = $1`, [rows[0].id]);
   return json({ visite: visitToJson(created[0]) }, 201);
@@ -1599,6 +1722,41 @@ function itemToJson(row: InventoryRow) {
   };
 }
 
+// --- Catégories de produits (liste gérable pour le menu déroulant) ---
+
+route("GET", "/api/inventory/categories", async () => {
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number; name: string }>(
+    "SELECT id, name FROM product_categories ORDER BY name",
+  );
+  return json({ categories: rows });
+});
+
+route("POST", "/api/inventory/categories", async (req) => {
+  const parsed = z.object({ name: z.string().trim().min(1, "Nom de catégorie requis").max(120) })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number; name: string }>(
+    `INSERT INTO product_categories (name) VALUES ($1)
+     ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name`,
+    [parsed.data.name],
+  );
+  return json({ categorie: rows[0] }, 201);
+});
+
+route("DELETE", "/api/inventory/categories/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query<{ name: string }>(
+    "DELETE FROM product_categories WHERE id = $1 RETURNING name",
+    [Number(params.id)],
+  );
+  if (!rows.length) return error("Catégorie introuvable.", 404);
+  // Les produits qui portaient cette catégorie la conservent en texte;
+  // elle disparaît seulement du menu déroulant.
+  return json({ ok: true, supprimee: rows[0].name });
+});
+
 // Import (ou mise à jour) du catalogue OJ Compagnie embarqué.
 route("POST", "/api/inventory/import-oj", async () => {
   const db = await getDb();
@@ -1729,6 +1887,8 @@ route("GET", "/api/inventory/:id/movements", async (_req, params) => {
 const orderSchema = z.object({
   supplier: z.string().min(1, "Fournisseur requis"),
   notes: z.string().default(""),
+  shippingCents: z.number().int().min(0).default(4500),
+  taxesEnabled: z.boolean().default(true),
   lines: z
     .array(
       z.object({
@@ -1756,6 +1916,11 @@ route("GET", "/api/orders", async () => {
       status: o.status,
       orderedOn: o.ordered_on ? toIsoDate(o.ordered_on) : null,
       receivedOn: o.received_on ? toIsoDate(o.received_on) : null,
+      subtotalCents: o.subtotal_cents,
+      shippingCents: o.shipping_cents,
+      taxesEnabled: o.taxes_enabled,
+      tpsCents: o.tps_cents,
+      tvqCents: o.tvq_cents,
       totalCents: o.total_cents,
       notes: o.notes,
       lines: (lines as any[])
@@ -1772,16 +1937,30 @@ route("GET", "/api/orders", async () => {
   });
 });
 
+// Totaux d'une commande : sous-total + livraison, puis TPS/TVQ sur le tout.
+function orderTotals(
+  subtotalCents: number,
+  shippingCents: number,
+  taxesEnabled: boolean,
+): { tpsCents: number; tvqCents: number; totalCents: number } {
+  const taxable = subtotalCents + shippingCents;
+  const tpsCents = taxesEnabled ? Math.round(taxable * 0.05) : 0;
+  const tvqCents = taxesEnabled ? Math.round(taxable * 0.09975) : 0;
+  return { tpsCents, tvqCents, totalCents: taxable + tpsCents + tvqCents };
+}
+
 route("POST", "/api/orders", async (req) => {
   const parsed = orderSchema.safeParse(await body(req));
   if (!parsed.success) return error(parsed.error.issues[0].message, 400);
   const d = parsed.data;
   const db = await getDb();
-  const total = d.lines.reduce((s, l) => s + Math.round(l.quantity * l.unitCostCents), 0);
+  const subtotal = d.lines.reduce((s, l) => s + Math.round(l.quantity * l.unitCostCents), 0);
+  const t = orderTotals(subtotal, d.shippingCents, d.taxesEnabled);
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO supplier_orders (supplier, status, ordered_on, total_cents, notes)
-     VALUES ($1, 'commandée', CURRENT_DATE, $2, $3) RETURNING id`,
-    [d.supplier, total, d.notes],
+    `INSERT INTO supplier_orders (supplier, status, ordered_on, subtotal_cents, shipping_cents,
+       taxes_enabled, tps_cents, tvq_cents, total_cents, notes)
+     VALUES ($1, 'commandée', CURRENT_DATE, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [d.supplier, subtotal, d.shippingCents, d.taxesEnabled, t.tpsCents, t.tvqCents, t.totalCents, d.notes],
   );
   for (const line of d.lines) {
     await db.query(
@@ -1790,7 +1969,56 @@ route("POST", "/api/orders", async (req) => {
       [rows[0].id, line.itemId ?? null, line.description, line.quantity, line.unitCostCents, Math.round(line.quantity * line.unitCostCents)],
     );
   }
-  return json({ commande: { id: rows[0].id, totalCents: total } }, 201);
+  return json({ commande: { id: rows[0].id, totalCents: t.totalCents } }, 201);
+});
+
+// Modification d'une commande : statut, notes, livraison, taxes, fournisseur.
+route("PUT", "/api/orders/:id", async (req, params) => {
+  const parsed = z
+    .object({
+      supplier: z.string().min(1).optional(),
+      status: z.enum(["brouillon", "commandée", "reçue", "annulée"]).optional(),
+      notes: z.string().optional(),
+      shippingCents: z.number().int().min(0).optional(),
+      taxesEnabled: z.boolean().optional(),
+    })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows: existing } = await db.query<{
+    id: number; status: string; subtotal_cents: number; shipping_cents: number; taxes_enabled: boolean;
+  }>("SELECT * FROM supplier_orders WHERE id = $1", [Number(params.id)]);
+  if (!existing[0]) return error("Commande introuvable.", 404);
+  // « reçue » passe par POST /receive (qui ajuste le stock), jamais par ici.
+  if (d.status === "reçue" && existing[0].status !== "reçue") {
+    return error("Utilisez « Marquer comme reçue » pour recevoir la commande (le stock sera ajusté).", 400);
+  }
+  const shipping = d.shippingCents ?? existing[0].shipping_cents;
+  const taxes = d.taxesEnabled ?? existing[0].taxes_enabled;
+  const t = orderTotals(existing[0].subtotal_cents, shipping, taxes);
+  await db.query(
+    `UPDATE supplier_orders SET supplier = COALESCE($1, supplier), status = COALESCE($2, status),
+       notes = COALESCE($3, notes), shipping_cents = $4, taxes_enabled = $5,
+       tps_cents = $6, tvq_cents = $7, total_cents = $8 WHERE id = $9`,
+    [d.supplier ?? null, d.status ?? null, d.notes ?? null, shipping, taxes,
+     t.tpsCents, t.tvqCents, t.totalCents, Number(params.id)],
+  );
+  return json({ ok: true, totalCents: t.totalCents });
+});
+
+route("DELETE", "/api/orders/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows: existing } = await db.query<{ status: string }>(
+    "SELECT status FROM supplier_orders WHERE id = $1",
+    [Number(params.id)],
+  );
+  if (!existing[0]) return error("Commande introuvable.", 404);
+  if (existing[0].status === "reçue") {
+    return error("Impossible de supprimer une commande reçue (le stock a été ajusté).", 400);
+  }
+  await db.query("DELETE FROM supplier_orders WHERE id = $1", [Number(params.id)]);
+  return json({ ok: true, supprime: Number(params.id) });
 });
 
 // Réception d'une commande : incrémente le stock des produits liés.
@@ -1884,6 +2112,7 @@ route("GET", "/api/revenues", async () => {
     revenus: (rows as any[]).map((r) => ({
       id: r.id, label: r.label, amountCents: r.amount_cents,
       receivedOn: toIsoDate(r.received_on), notes: r.notes,
+      source: r.source ?? "manuel",
     })),
   });
 });
@@ -1906,6 +2135,38 @@ route("DELETE", "/api/revenues/:id", async (_req, params) => {
   const { rows } = await db.query("DELETE FROM revenues WHERE id = $1 RETURNING id", [Number(params.id)]);
   if (!rows.length) return error("Revenu introuvable.", 404);
   return json({ ok: true });
+});
+
+// Synchronisation des paiements Square → revenus (idempotente par paiement).
+route("POST", "/api/finances/sync-square", async () => {
+  const db = await getDb();
+  let payments;
+  try {
+    payments = await listSquarePayments(365);
+  } catch (err) {
+    if (err instanceof SquareError) return error(err.message, err.status);
+    throw err;
+  }
+  let inseres = 0;
+  for (const p of payments) {
+    const amount = p.amount_money?.amount ?? 0;
+    if (amount <= 0) continue;
+    const { rows } = await db.query(
+      `INSERT INTO revenues (label, amount_cents, received_on, notes, source, square_payment_id)
+       VALUES ($1, $2, $3::date, $4, 'square', $5)
+       ON CONFLICT (square_payment_id) WHERE square_payment_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [
+        `Paiement Square ${p.id.slice(0, 8)}`,
+        amount,
+        (p.created_at ?? new Date().toISOString()).slice(0, 10),
+        p.note ?? "",
+        p.id,
+      ],
+    );
+    if (rows.length) inseres++;
+  }
+  return json({ ok: true, paiements: payments.length, nouveauxRevenus: inseres });
 });
 
 // Rapport de marges : revenus (factures payées + revenus manuels) − coûts (dépenses).
@@ -1954,6 +2215,10 @@ const campaignSchema = z.object({
   name: z.string().min(1, "Nom de campagne requis"),
   channel: z.string().default(""),
   content: z.string().default(""),
+  objective: z.string().default(""),
+  tone: z.string().default(""),
+  aiPrompt: z.string().default(""),
+  imageData: z.string().default(""),
   launchOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date de lancement requise (AAAA-MM-JJ)"),
 });
 
@@ -1963,6 +2228,10 @@ function campaignToJson(r: any) {
     name: r.name,
     channel: r.channel,
     content: r.content,
+    objective: r.objective ?? "",
+    tone: r.tone ?? "",
+    aiPrompt: r.ai_prompt ?? "",
+    imageData: r.image_data ?? "",
     launchOn: r.launch_on ? toIsoDate(r.launch_on) : null,
     status: r.status,
     createdAt: r.created_at,
@@ -1983,9 +2252,9 @@ route("POST", "/api/campaigns", async (req) => {
   const today = new Date().toISOString().slice(0, 10);
   const status = d.launchOn > today ? "planifiée" : "lancée";
   const { rows } = await db.query(
-    `INSERT INTO campaigns (name, channel, content, launch_on, status)
-     VALUES ($1,$2,$3,$4::date,$5) RETURNING *`,
-    [d.name, d.channel, d.content, d.launchOn, status],
+    `INSERT INTO campaigns (name, channel, content, objective, tone, ai_prompt, image_data, launch_on, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::date,$9) RETURNING *`,
+    [d.name, d.channel, d.content, d.objective, d.tone, d.aiPrompt, d.imageData, d.launchOn, status],
   );
   return json({ campagne: campaignToJson(rows[0]) }, 201);
 });
@@ -2000,7 +2269,8 @@ route("PUT", "/api/campaigns/:id", async (req, params) => {
   const db = await getDb();
   const map: [string, unknown][] = [
     ["name", d.name], ["channel", d.channel], ["content", d.content],
-    ["launch_on", d.launchOn], ["status", d.status],
+    ["objective", d.objective], ["tone", d.tone], ["ai_prompt", d.aiPrompt],
+    ["image_data", d.imageData], ["launch_on", d.launchOn], ["status", d.status],
   ];
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -2025,6 +2295,55 @@ route("DELETE", "/api/campaigns/:id", async (_req, params) => {
   const { rows } = await db.query("DELETE FROM campaigns WHERE id = $1 RETURNING id", [Number(params.id)]);
   if (!rows.length) return error("Campagne introuvable.", 404);
   return json({ ok: true });
+});
+
+// Génération IA (Gemini) : texte d'annonce ou visuel publicitaire.
+route("POST", "/api/marketing/generate", async (req) => {
+  const parsed = z
+    .object({
+      mode: z.enum(["texte", "image"]),
+      platform: z.string().default("Facebook"),
+      objective: z.string().default(""),
+      tone: z.string().default("chaleureux et professionnel"),
+      details: z.string().default(""),
+    })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  try {
+    if (d.mode === "texte") {
+      const prompt = [
+        `Tu es le responsable marketing de « St-Amour du Vert », une entreprise`,
+        `familiale d'entretien de pelouse à L'Ange-Gardien (Outaouais, Québec) —`,
+        `forfaits saisonniers Essentiel / Régulier / Élite, produits naturels,`,
+        `site web stamourduvert.com, téléphone 819-598-7891.`,
+        `Rédige le texte d'une annonce ${d.platform} en français québécois.`,
+        d.objective ? `Objectif de la campagne : ${d.objective}.` : "",
+        `Ton : ${d.tone}.`,
+        d.details ? `Détails à intégrer : ${d.details}.` : "",
+        `Réponds UNIQUEMENT avec le texte de l'annonce, prêt à copier-coller`,
+        `(accroche, corps court, appel à l'action, 3 à 5 mots-clics pertinents).`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const texte = await generateAdText(prompt);
+      return json({ texte });
+    }
+    const prompt = [
+      `Publicité pour une entreprise d'entretien de pelouse au Québec (St-Amour du Vert).`,
+      `Image photoréaliste lumineuse : pelouse résidentielle verte impeccable,`,
+      `banlieue québécoise, été. Aucun texte dans l'image.`,
+      d.objective ? `Thème : ${d.objective}.` : "",
+      d.details ? `Détails : ${d.details}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const image = await generateAdImage(prompt);
+    return json({ image });
+  } catch (err) {
+    if (err instanceof GeminiError) return error(err.message, err.status === 429 ? 429 : 502);
+    throw err;
+  }
 });
 
 // ---------- Répartiteur ----------

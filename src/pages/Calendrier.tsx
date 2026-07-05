@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError, type Client, type PlanRoute, type Visite } from "../api";
 
 function aujourdhui(): string {
@@ -26,10 +27,19 @@ export default function Calendrier() {
   const [enCours, setEnCours] = useState(false);
   const [formVisible, setFormVisible] = useState(false);
   const [nouvelle, setNouvelle] = useState({ clientId: "", heure: "08:00", durationMinutes: "45", services: "" });
+  const [aVenir, setAVenir] = useState<Visite[]>([]);
 
   const charger = useCallback(async () => {
     const r = await api.get<{ visites: Visite[] }>(`/api/visits?date=${date}`);
     setVisites(r.visites);
+    const tout = await api.get<{ visites: Visite[] }>("/api/visits");
+    const maintenant = Date.now();
+    setAVenir(
+      tout.visites
+        .filter((v) => v.status === "planifiee" && new Date(v.scheduledAt).getTime() >= maintenant)
+        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+        .slice(0, 30),
+    );
   }, [date]);
 
   useEffect(() => {
@@ -82,6 +92,13 @@ export default function Calendrier() {
 
   async function changerStatut(v: Visite, statut: string) {
     await api.put(`/api/visits/${v.id}`, { status: statut });
+    await charger();
+  }
+
+  // Déplacer une visite (gestion manuelle du calendrier).
+  async function deplacer(v: Visite, quand: string) {
+    if (!quand) return;
+    await api.put(`/api/visits/${v.id}`, { scheduledAt: `${quand}:00` });
     await charger();
   }
 
@@ -174,6 +191,7 @@ export default function Calendrier() {
                 <th>Client</th>
                 <th>Adresse</th>
                 <th>Services</th>
+                <th>Contrat</th>
                 <th>Ordre route</th>
                 <th>Statut</th>
                 <th />
@@ -188,13 +206,16 @@ export default function Calendrier() {
                     {v.addressLine}, {v.city}
                   </td>
                   <td>{v.services || "—"}</td>
+                  <td>
+                    {v.documentId ? (
+                      <Link to={`/documents/${v.documentId}`}>{v.contractNumber ?? `#${v.documentId}`}</Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td>{v.routePosition ? <span className="chip">no {v.routePosition}</span> : "—"}</td>
                   <td>
-                    <select
-                      value={v.status}
-                      onChange={(e) => changerStatut(v, e.target.value)}
-                      style={{ font: "inherit", padding: "4px 8px", borderRadius: 8 }}
-                    >
+                    <select value={v.status} onChange={(e) => changerStatut(v, e.target.value)}>
                       {Object.entries(STATUTS).map(([value, label]) => (
                         <option key={value} value={value}>
                           {label}
@@ -211,6 +232,58 @@ export default function Calendrier() {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Prochaines visites planifiées</h2>
+        <p style={{ color: "var(--muted)", fontSize: 13 }}>
+          Les visites des contrats signés apparaissent ici automatiquement — changez la
+          date/heure directement dans la liste, l'ordre du jour suit.
+        </p>
+        {aVenir.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>Aucune visite à venir.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Date & heure</th>
+                  <th>Client</th>
+                  <th>Services</th>
+                  <th>Contrat</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {aVenir.map((v) => (
+                  <tr key={v.id}>
+                    <td>
+                      <input
+                        type="datetime-local"
+                        defaultValue={v.scheduledAt.slice(0, 16)}
+                        onBlur={(e) => e.target.value !== v.scheduledAt.slice(0, 16) && deplacer(v, e.target.value)}
+                      />
+                    </td>
+                    <td>{v.clientName}</td>
+                    <td>{v.services || "—"}</td>
+                    <td>
+                      {v.documentId ? (
+                        <Link to={`/documents/${v.documentId}`}>{v.contractNumber ?? `#${v.documentId}`}</Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>
+                      <button className="btn danger small" onClick={() => supprimer(v.id)}>
+                        Retirer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

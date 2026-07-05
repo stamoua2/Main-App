@@ -541,8 +541,12 @@ export default function Forfaits() {
                 <input value={visitCountStr} onChange={(e) => setVisitCountStr(e.target.value)} inputMode="numeric" />
               </label>
               <label className="field">
-                Coût par visite ($ — déplacement, main-d'œuvre)
+                Votre coût par visite ($) — essence, déplacement, main-d'œuvre
                 <input value={visitCostStr} onChange={(e) => setVisitCostStr(e.target.value)} inputMode="decimal" />
+                <span className="field-hint">
+                  Coût interne seulement : il sert au calcul de votre coût de revient et
+                  n'est jamais facturé au client.
+                </span>
               </label>
             </div>
 

@@ -19,6 +19,7 @@ export default defineConfig({
       SQUARE_WEBHOOK_SIGNATURE_KEY: "cle-webhook-de-test",
       SQUARE_WEBHOOK_NOTIFICATION_URL: "https://mainappsav.netlify.app/api/webhooks/square",
       GOOGLE_MAPS_API_KEY: "cle-maps-de-test",
+      GEMINI_API_KEY: "cle-gemini-de-test",
     },
     testTimeout: 30000,
     fileParallelism: false,

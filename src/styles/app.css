@@ -59,6 +59,18 @@ h1, h2, h3 {
 
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 
+.nav-toggle {
+  display: none;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font: inherit;
+  cursor: pointer;
+  margin-left: auto;
+}
+
 .sidebar nav a {
   display: flex;
   align-items: baseline;
@@ -194,8 +206,11 @@ table.data tr:hover td { background: var(--green-pale-3, #f2f5ef); }
 
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
 
-label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-3, #3a4336); }
-label.field input, label.field select, label.field textarea {
+/* Champs standardisés partout : même apparence pour toutes les zones de
+   texte, listes déroulantes et zones multi-lignes de l'application. */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
   font: inherit;
   font-weight: 400;
   padding: 9px 12px;
@@ -203,13 +218,58 @@ label.field input, label.field select, label.field textarea {
   border: 1px solid var(--border-4, #dad5c8);
   background: var(--cream-input, #fcfbf7);
   color: var(--ink);
+  max-width: 100%;
 }
-label.field input:focus, label.field select:focus, label.field textarea:focus {
+input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--green-prairie);
   outline-offset: 0;
   border-color: var(--green-prairie);
 }
+/* Version compacte dans les tableaux */
+table.data input:not([type="checkbox"]), table.data select {
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 13.5px;
+}
+
+label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink-3, #3a4336); }
 label.field.check { flex-direction: row; align-items: center; gap: 9px; }
+.field-hint { font-weight: 400; font-size: 12px; color: var(--muted, #4a5247); }
+
+/* Bouton discret de type lien (ex. : revenir à l'acompte automatique) */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--green-prairie);
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Barre d'actions horizontale (filtres, boutons) */
+.toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+
+/* Actions en fin de ligne de tableau */
+.row-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Conteneur défilant : les grands tableaux défilent sans casser la page */
+.table-scroll { overflow-x: auto; }
+
+/* Petit « × » dans une puce (retirer une section, une catégorie…) */
+.chip-x {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted-2, #5b6157);
+  cursor: pointer;
+}
+.chip-x:hover { color: #a33b2a; }
 
 /* Champ mot de passe avec bouton œil */
 .pw-wrap { position: relative; display: block; }
@@ -355,9 +415,47 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
 
 .doc-meta { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; color: var(--muted); font-size: 14px; }
 
+/* ---------- Mobile ---------- */
+
 @media (max-width: 900px) {
   .app-shell { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: static; }
-  .main { padding: 22px 18px 50px; }
-  .lines-editor .line-row { grid-template-columns: 1fr 70px 100px 90px 34px; }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    padding: 12px 16px;
+  }
+  .sidebar .brand { font-size: 17px; }
+  .sidebar .brand-sub { margin-bottom: 0; }
+  .nav-toggle { display: inline-flex; }
+  .sidebar nav { display: none; }
+  .sidebar .session { display: none; }
+  .sidebar.menu-open nav {
+    display: flex;
+    width: 100%;
+    order: 10;
+    padding-top: 10px;
+  }
+  .sidebar.menu-open .session {
+    display: block;
+    width: 100%;
+    order: 11;
+  }
+  .main { padding: 20px 14px 50px; }
+  .page-head { align-items: flex-start; flex-direction: column; }
+  .page-head h1 { font-size: 22px; }
+  /* Les grands tableaux défilent horizontalement dans leur panneau */
+  .panel { overflow-x: auto; }
+  .form-grid { grid-template-columns: 1fr; }
+  .lines-editor .line-row { grid-template-columns: 1fr 58px 84px 76px 30px; }
+  .lines-editor .line-row select { grid-column: 1 / -1; }
+  .totals-box { max-width: none; }
+  .map-canvas { height: 380px; }
+  .data select { max-width: 200px; }
 }

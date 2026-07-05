@@ -118,12 +118,12 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
   }>("SELECT * FROM documents WHERE id = $1", [documentId]);
   const doc = docs[0];
   if (!doc) throw new SquareError("Document introuvable.", 404, null);
-  if (doc.kind !== "facture") {
-    throw new SquareError("Seule une facture peut être envoyée vers Square (convertissez l'estimation d'abord).", 400, null);
-  }
   if (doc.square_invoice_id) {
-    throw new SquareError(`Cette facture est déjà dans Square (${doc.square_invoice_id}).`, 409, null);
+    throw new SquareError(`Ce document est déjà dans Square (${doc.square_invoice_id}).`, 409, null);
   }
+  // Estimation : créée en BROUILLON dans Square (visible au tableau de bord
+  // Square, jamais envoyée au client). Contrat et facture : publiés.
+  const publier = doc.kind !== "estimation";
 
   const { rows: clients } = await db.query<{
     id: number;
@@ -208,22 +208,31 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
       payment_requests: paymentRequests,
       delivery_method: "SHARE_MANUALLY",
       invoice_number: doc.number,
-      title: "St-Amour du Vert — Entretien de pelouse",
+      title:
+        doc.kind === "contrat"
+          ? "St-Amour du Vert — Contrat d'entretien de pelouse"
+          : "St-Amour du Vert — Entretien de pelouse",
       accepted_payment_methods: { card: true },
     },
   });
 
-  // 4) Publication
-  const published = await squareFetch<{ invoice: SquareInvoice }>(
-    `/v2/invoices/${created.invoice.id}/publish`,
-    "POST",
-    { idempotency_key: randomUUID(), version: created.invoice.version },
-  );
+  // 4) Publication (sauf estimation, qui reste en brouillon dans Square)
+  const published = publier
+    ? await squareFetch<{ invoice: SquareInvoice }>(
+        `/v2/invoices/${created.invoice.id}/publish`,
+        "POST",
+        { idempotency_key: randomUUID(), version: created.invoice.version },
+      )
+    : created;
 
   await db.query(
     `UPDATE documents SET square_invoice_id = $1, square_payment_status = $2,
-       square_public_url = $3, updated_at = now() WHERE id = $4`,
-    [published.invoice.id, published.invoice.status, published.invoice.public_url ?? null, documentId],
+       square_public_url = $3,
+       status = CASE WHEN $5 THEN
+         (CASE WHEN kind = 'contrat' THEN 'envoyé' ELSE 'à payer' END)
+         ELSE status END,
+       updated_at = now() WHERE id = $4`,
+    [published.invoice.id, published.invoice.status, published.invoice.public_url ?? null, documentId, publier],
   );
 
   return {
@@ -240,7 +249,14 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
 
 const PAID_STATUSES = new Set(["PAID", "REFUNDED", "PARTIALLY_REFUNDED"]);
 
-export function mapSquareStatus(squareStatus: string): string | null {
+export function mapSquareStatus(squareStatus: string, kind = "facture"): string | null {
+  if (kind === "contrat") {
+    // L'acompte payé vaut signature du contrat; le paiement complet le clôt.
+    if (PAID_STATUSES.has(squareStatus)) return "payé";
+    if (squareStatus === "PARTIALLY_PAID") return "signé";
+    if (squareStatus === "CANCELED") return "annulé";
+    return null;
+  }
   if (PAID_STATUSES.has(squareStatus)) return "payée";
   if (squareStatus === "PARTIALLY_PAID") return "partiellement payée";
   if (squareStatus === "CANCELED") return "annulée";
@@ -254,25 +270,40 @@ export async function applySquareInvoiceUpdate(invoice: {
   public_url?: string;
 }): Promise<{ documentId: number; number: string; statusBefore: string; statusAfter: string } | null> {
   const db = await getDb();
-  const { rows } = await db.query<{ id: number; number: string; status: string }>(
-    "SELECT id, number, status FROM documents WHERE square_invoice_id = $1",
+  const { rows } = await db.query<{ id: number; number: string; status: string; kind: string }>(
+    "SELECT id, number, status, kind FROM documents WHERE square_invoice_id = $1",
     [invoice.id],
   );
   const doc = rows[0];
   if (!doc || !invoice.status) return null;
-  const mapped = mapSquareStatus(invoice.status);
+  const mapped = mapSquareStatus(invoice.status, doc.kind);
   const newStatus = mapped ?? doc.status;
   await db.query(
     `UPDATE documents SET square_payment_status = $1, status = $2,
        square_public_url = COALESCE($3, square_public_url), updated_at = now() WHERE id = $4`,
     [invoice.status, newStatus, invoice.public_url ?? null, doc.id],
   );
-  if (mapped === "payée" && doc.status !== "payée") {
+  if (doc.kind !== "contrat" && mapped === "payée" && doc.status !== "payée") {
     await db.query(
       `INSERT INTO notifications (kind, title, body, link) VALUES ('paiement', $1, $2, $3)`,
       [
         `Facture ${doc.number} payée`,
         `Square confirme le paiement de la facture ${doc.number}.`,
+        `/documents/${doc.id}`,
+      ],
+    );
+  }
+  if (
+    doc.kind === "contrat" &&
+    (mapped === "signé" || mapped === "payé") &&
+    doc.status !== "signé" &&
+    doc.status !== "payé"
+  ) {
+    await db.query(
+      `INSERT INTO notifications (kind, title, body, link) VALUES ('contrat', $1, $2, $3)`,
+      [
+        `Contrat ${doc.number} signé`,
+        `Le client a payé via Square — le contrat ${doc.number} est confirmé.`,
         `/documents/${doc.id}`,
       ],
     );
@@ -299,6 +330,35 @@ export async function syncDocumentFromSquare(documentId: number): Promise<{
   );
   const applied = await applySquareInvoiceUpdate(data.invoice);
   return { squareStatus: data.invoice.status, document: applied };
+}
+
+// ---------- Paiements (synchronisation des revenus) ----------
+
+export interface SquarePayment {
+  id: string;
+  status: string;
+  amount_money?: { amount: number; currency: string };
+  created_at?: string;
+  note?: string;
+  order_id?: string;
+}
+
+/** Paiements COMPLETED des `days` derniers jours (pagination suivie). */
+export async function listSquarePayments(days = 365): Promise<SquarePayment[]> {
+  const begin = new Date(Date.now() - days * 86400000).toISOString();
+  const payments: SquarePayment[] = [];
+  let cursor: string | undefined;
+  do {
+    const params = new URLSearchParams({ begin_time: begin, limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const data = await squareFetch<{ payments?: SquarePayment[]; cursor?: string }>(
+      `/v2/payments?${params}`,
+      "GET",
+    );
+    payments.push(...(data.payments ?? []));
+    cursor = data.cursor;
+  } while (cursor);
+  return payments.filter((p) => p.status === "COMPLETED");
 }
 
 // ---------- Webhook ----------
