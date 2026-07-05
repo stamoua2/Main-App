@@ -314,15 +314,22 @@ route(
       : process.env.NETLIFY_DATABASE_URL
         ? "NETLIFY_DATABASE_URL"
         : "aucune (PGlite locale)";
+    const variables = {
+      GOOGLE_MAPS_API_KEY: Boolean(process.env.GOOGLE_MAPS_API_KEY),
+      SQUARE_ACCESS_TOKEN: Boolean(process.env.SQUARE_ACCESS_TOKEN),
+      SQUARE_WEBHOOK_SIGNATURE_KEY: Boolean(process.env.SQUARE_WEBHOOK_SIGNATURE_KEY),
+      SESSION_SECRET: Boolean(process.env.SESSION_SECRET),
+    };
     try {
       const db = await getDb();
       const { rows } = await db.query<{ n: string }>("SELECT count(*) AS n FROM users");
-      return json({ ok: true, base: dbUrlSource, utilisateurs: Number(rows[0].n) });
+      return json({ ok: true, base: dbUrlSource, variables, utilisateurs: Number(rows[0].n) });
     } catch (err) {
       return json(
         {
           ok: false,
           base: dbUrlSource,
+          variables,
           erreur: err instanceof Error ? `${err.constructor.name}: ${err.message.slice(0, 300)}` : String(err),
         },
         500,

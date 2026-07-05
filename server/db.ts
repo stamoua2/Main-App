@@ -32,7 +32,12 @@ async function createDb(): Promise<Db> {
         return { rows: (Array.isArray(rows) ? rows : (rows as { rows: T[] }).rows) as T[] };
       },
     };
-  } else if (process.env.NETLIFY) {
+  } else if (
+    process.env.NETLIFY ||
+    process.env.NETLIFY_LOCAL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT
+  ) {
     // En production Netlify sans base : erreur explicite plutôt qu'un 500 opaque.
     throw new DbNotProvisionedError(
       "Netlify DB non provisionnée : ouvrez l'extension Neon du site (Extensions → Neon → Add database) " +
