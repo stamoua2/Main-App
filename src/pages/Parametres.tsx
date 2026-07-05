@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type Parametres as ParametresType, type Utilisateur } from "../api";
+import ChampMotDePasse from "../components/ChampMotDePasse";
 
 export default function Parametres() {
   const [parametres, setParametres] = useState<ParametresType | null>(null);
@@ -238,12 +239,12 @@ export default function Parametres() {
                 </label>
                 <label className="field">
                   Nouveau mot de passe (laisser vide pour conserver)
-                  <input
-                    type="password"
+                  <ChampMotDePasse
                     value={edition.password}
-                    onChange={(e) => setEdition({ ...edition, password: e.target.value })}
+                    onChange={(v) => setEdition({ ...edition, password: v })}
                     minLength={8}
                     placeholder="••••••••"
+                    autoComplete="new-password"
                   />
                 </label>
               </div>
@@ -290,14 +291,12 @@ export default function Parametres() {
             </label>
             <label className="field">
               Mot de passe (8 caractères min.)
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={nouvelUtilisateur.password}
-                onChange={(e) =>
-                  setNouvelUtilisateur({ ...nouvelUtilisateur, password: e.target.value })
-                }
+                onChange={(v) => setNouvelUtilisateur({ ...nouvelUtilisateur, password: v })}
                 minLength={8}
                 required
+                autoComplete="new-password"
               />
             </label>
           </div>

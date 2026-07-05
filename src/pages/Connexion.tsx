@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError, type Utilisateur } from "../api";
+import ChampMotDePasse from "../components/ChampMotDePasse";
 
 export default function Connexion({ onConnecte }: { onConnecte: (u: Utilisateur) => void }) {
   const [identifiant, setIdentifiant] = useState("");
@@ -42,10 +43,9 @@ export default function Connexion({ onConnecte }: { onConnecte: (u: Utilisateur)
           </label>
           <label className="field">
             Mot de passe
-            <input
-              type="password"
+            <ChampMotDePasse
               value={motDePasse}
-              onChange={(e) => setMotDePasse(e.target.value)}
+              onChange={setMotDePasse}
               autoComplete="current-password"
               required
             />

@@ -211,6 +211,25 @@ label.field input:focus, label.field select:focus, label.field textarea:focus {
 }
 label.field.check { flex-direction: row; align-items: center; gap: 9px; }
 
+/* Champ mot de passe avec bouton œil */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 42px; }
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 8px;
+  color: var(--muted-3, #6a7a64);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.pw-toggle:hover { color: var(--green-prairie, #2e8255); background: var(--green-pale-3, #f2f5ef); }
+
 .error-text { color: #a33b2a; font-size: 13.5px; margin: 8px 0; }
 .ok-text { color: var(--green-prairie); font-size: 13.5px; margin: 8px 0; }
 
