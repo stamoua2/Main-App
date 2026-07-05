@@ -74,6 +74,11 @@ async function createDb(): Promise<Db> {
   if (Number(rows[0].n) === 0) {
     const { seedAll } = await import("./seed.js");
     await seedAll(db);
+  } else {
+    // Base déjà peuplée (production existante) : insère quand même les défauts
+    // du calculateur de prix des forfaits s'ils manquent (idempotent).
+    const { seedPackagePricingDefaults } = await import("./seed.js");
+    await seedPackagePricingDefaults(db);
   }
   return db;
 }
