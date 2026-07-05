@@ -14,6 +14,7 @@
     "@electric-sql/pglite": "^0.2.17",
     "@neondatabase/serverless": "^0.10.4",
     "@netlify/database": "^1.1.0",
+    "@netlify/neon": "^0.1.2",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
     "pdf-lib": "^1.17.1",
