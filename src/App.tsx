@@ -13,6 +13,10 @@ import DetailDocument from "./pages/DetailDocument";
 import Parametres from "./pages/Parametres";
 import Calendrier from "./pages/Calendrier";
 import Soumissions from "./pages/Soumissions";
+import Inventaire from "./pages/Inventaire";
+import Commandes from "./pages/Commandes";
+import Finances from "./pages/Finances";
+import Marketing from "./pages/Marketing";
 
 const NAV = [
   { to: "/", label: "Tableau de bord", num: "01" },
@@ -22,7 +26,11 @@ const NAV = [
   { to: "/calendrier", label: "Calendrier & routes", num: "05" },
   { to: "/soumissions", label: "Soumissions web", num: "06" },
   { to: "/documents", label: "Estimations & factures", num: "07" },
-  { to: "/parametres", label: "Paramètres", num: "08" },
+  { to: "/inventaire", label: "Inventaire", num: "08" },
+  { to: "/commandes", label: "Commandes", num: "09" },
+  { to: "/finances", label: "Finances", num: "10" },
+  { to: "/marketing", label: "Marketing", num: "11" },
+  { to: "/parametres", label: "Paramètres", num: "12" },
 ];
 
 export default function App() {
@@ -88,6 +96,10 @@ export default function App() {
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/nouveau" element={<NouveauDocument />} />
           <Route path="/documents/:id" element={<DetailDocument />} />
+          <Route path="/inventaire" element={<Inventaire />} />
+          <Route path="/commandes" element={<Commandes />} />
+          <Route path="/finances" element={<Finances />} />
+          <Route path="/marketing" element={<Marketing />} />
           <Route path="/parametres" element={<Parametres />} />
           <Route path="/connexion" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

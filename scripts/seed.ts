@@ -17,6 +17,7 @@ const packages = await db.query<{ name: string; visits: string; n: string }>(
 );
 const clients = await db.query<{ n: string }>("SELECT count(*) AS n FROM clients");
 const services = await db.query<{ n: string }>("SELECT count(*) AS n FROM services");
+const oj = await db.query<{ n: string }>("SELECT count(*) AS n FROM inventory_items WHERE source = 'oj'");
 
 console.log("Données de départ insérées :");
 console.log("  Utilisateurs :", users.rows.map((u) => `${u.name} <${u.email}>`).join(", "));
@@ -24,5 +25,6 @@ for (const p of packages.rows) {
   console.log(`  Forfait ${p.name} — ${p.visits} — ${p.n} services associés`);
 }
 console.log(`  Services au catalogue : ${services.rows[0].n}`);
+console.log(`  Produits OJ Compagnie : ${oj.rows[0].n}`);
 console.log(`  Clients : ${clients.rows[0].n}`);
 process.exit(0);

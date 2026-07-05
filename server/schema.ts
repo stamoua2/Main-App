@@ -223,6 +223,35 @@ export const DDL: string[] = [
     received_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
 
+  // ---- Passe 3 : ajouts (idempotents) ----
+  `ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS format TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`,
+
+  `CREATE TABLE IF NOT EXISTS supplier_order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES supplier_orders(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES inventory_items(id) ON DELETE SET NULL,
+    description TEXT NOT NULL DEFAULT '',
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 1,
+    unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+    amount_cents INTEGER NOT NULL DEFAULT 0
+  )`,
+
+  // Revenus saisis manuellement (les factures payées comptent aussi comme revenus).
+  `CREATE TABLE IF NOT EXISTS revenues (
+    id SERIAL PRIMARY KEY,
+    label TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    received_on DATE NOT NULL DEFAULT CURRENT_DATE,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(item_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(spent_on)`,
+  `CREATE INDEX IF NOT EXISTS idx_revenues_date ON revenues(received_on)`,
+
   `CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id)`,
   `CREATE INDEX IF NOT EXISTS idx_document_lines_doc ON document_lines(document_id)`,

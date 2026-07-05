@@ -10,6 +10,9 @@ interface Dashboard {
   facturesImpayees: number;
   visitesAujourdhui: number;
   notificationsNonLues: number;
+  margeMoisCents: number;
+  revenusMoisCents: number;
+  depensesMoisCents: number;
   soumissionsNouvelles: {
     id: number;
     fullName: string;
@@ -63,6 +66,15 @@ export default function TableauDeBord() {
         <div className="panel stat">
           <div className="label">Visites aujourd'hui</div>
           <div className="value">{data.visitesAujourdhui}</div>
+        </div>
+        <div className="panel stat">
+          <div className="label">Marge du mois</div>
+          <div className="value" style={{ color: data.margeMoisCents < 0 ? "#a33b2a" : undefined }}>
+            {formatCad(data.margeMoisCents)}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+            Revenus {formatCad(data.revenusMoisCents)} − dépenses {formatCad(data.depensesMoisCents)}
+          </div>
         </div>
       </div>
 

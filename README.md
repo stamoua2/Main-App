@@ -12,8 +12,15 @@ Maps, estimations et factures PDF.
 paiements entrants par webhook), réception des soumissions du formulaire de
 stamourduvert.com (prospect + notification), calendrier de visites avec
 optimisation de routes (Google Routes API).
-**Passe à venir** : inventaire, commandes, finances, marketing — le schéma de
-base de données contient déjà leurs tables.
+**Passe 3 — Opérations** : inventaire (catalogue OJ Compagnie 2026 importé +
+produits manuels + suivi des stocks), commandes fournisseurs (réception →
+stock incrémenté), finances (dépenses, revenus, rapport de marges) et
+marketing (campagnes planifiées à l'avance). Tableau de bord complété
+(soumissions récentes, visites du jour, factures impayées, marge du mois).
+
+Le catalogue OJ Compagnie vit dans `server/oj-catalog.ts` (transcrit de la
+liste de prix 2026 fournie en PDF). Il est importé au seed et ré-importable
+sans doublon via `POST /api/inventory/import-oj` (mise à jour des prix).
 
 ## Pile technique
 

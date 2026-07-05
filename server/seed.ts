@@ -3,6 +3,41 @@
 import type { Db } from "./db.js";
 import { hashPassword } from "./auth.js";
 import { SEED_ALEX, SEED_TEST_CLIENTS, SITE_PACKAGES, SITE_SERVICES } from "./seed-data.js";
+import { OJ_CATALOG } from "./oj-catalog.js";
+
+/**
+ * Importe (ou met à jour) le catalogue OJ Compagnie. Idempotent : la clé
+ * d'identification est le SKU lorsqu'il existe, sinon le couple nom + format.
+ * Les quantités en stock ne sont jamais écrasées.
+ */
+export async function importOjCatalog(db: Db): Promise<{ inserted: number; updated: number; total: number }> {
+  let inserted = 0;
+  let updated = 0;
+  for (const product of OJ_CATALOG) {
+    const { rows: existing } = await db.query<{ id: number }>(
+      product.sku
+        ? "SELECT id FROM inventory_items WHERE source = 'oj' AND sku = $1"
+        : "SELECT id FROM inventory_items WHERE source = 'oj' AND name = $1 AND format = $2",
+      product.sku ? [product.sku] : [product.name, product.format],
+    );
+    if (existing.length) {
+      await db.query(
+        `UPDATE inventory_items SET name = $1, category = $2, format = $3, cost_cents = $4, active = true
+         WHERE id = $5`,
+        [product.name, product.category, product.format, product.priceCents, existing[0].id],
+      );
+      updated++;
+    } else {
+      await db.query(
+        `INSERT INTO inventory_items (sku, name, source, category, format, unit, quantity, cost_cents)
+         VALUES ($1, $2, 'oj', $3, $4, 'unité', 0, $5)`,
+        [product.sku ?? null, product.name, product.category, product.format, product.priceCents],
+      );
+      inserted++;
+    }
+  }
+  return { inserted, updated, total: OJ_CATALOG.length };
+}
 
 export async function seedAll(db: Db, options: { alexPassword?: string } = {}): Promise<void> {
   // Compte d'Alex
@@ -51,6 +86,9 @@ export async function seedAll(db: Db, options: { alexPassword?: string } = {}): 
       [svc.name, svc.description, i],
     );
   }
+
+  // Catalogue OJ Compagnie
+  await importOjCatalog(db);
 
   // Clients test avec adresses réelles de la région
   for (const client of SEED_TEST_CLIENTS) {

@@ -787,7 +787,27 @@ route("GET", "/api/dashboard", async () => {
   const { rows: todaysVisits } = await db.query<{ n: string }>(
     "SELECT count(*) AS n FROM visits WHERE scheduled_at::date = CURRENT_DATE AND status != 'annulee'",
   );
+  // Marge du mois courant : revenus (factures payées + revenus manuels) − dépenses.
+  const sumMonth = async (sql: string) =>
+    Number((await db.query<{ s: string | null }>(sql)).rows[0].s ?? 0);
+  const revenusMois =
+    (await sumMonth(
+      `SELECT COALESCE(SUM(total_cents),0) AS s FROM documents
+       WHERE kind = 'facture' AND status = 'payée'
+         AND date_trunc('month', issued_on) = date_trunc('month', CURRENT_DATE)`,
+    )) +
+    (await sumMonth(
+      `SELECT COALESCE(SUM(amount_cents),0) AS s FROM revenues
+       WHERE date_trunc('month', received_on) = date_trunc('month', CURRENT_DATE)`,
+    ));
+  const depensesMois = await sumMonth(
+    `SELECT COALESCE(SUM(amount_cents),0) AS s FROM expenses
+     WHERE date_trunc('month', spent_on) = date_trunc('month', CURRENT_DATE)`,
+  );
   return json({
+    margeMoisCents: revenusMois - depensesMois,
+    revenusMoisCents: revenusMois,
+    depensesMoisCents: depensesMois,
     clientsActifs,
     prospects,
     estimationsEnCours,
@@ -1231,6 +1251,477 @@ route(
   },
   { auth: false },
 );
+
+// --- Passe 3 : inventaire ---
+
+const inventoryItemSchema = z.object({
+  sku: z.string().max(60).default(""),
+  name: z.string().min(1, "Nom du produit requis"),
+  category: z.string().max(120).default(""),
+  format: z.string().max(120).default(""),
+  unit: z.string().max(40).default("unité"),
+  quantity: z.number().min(0).default(0),
+  costCents: z.number().int().min(0).default(0),
+  notes: z.string().default(""),
+});
+
+interface InventoryRow {
+  id: number;
+  sku: string | null;
+  name: string;
+  source: string;
+  category: string;
+  format: string;
+  unit: string;
+  quantity: string;
+  cost_cents: number;
+  notes: string;
+  active: boolean;
+}
+
+function itemToJson(row: InventoryRow) {
+  return {
+    id: row.id,
+    sku: row.sku ?? "",
+    name: row.name,
+    source: row.source,
+    category: row.category,
+    format: row.format,
+    unit: row.unit,
+    quantity: Number(row.quantity),
+    costCents: row.cost_cents,
+    notes: row.notes,
+    active: row.active,
+  };
+}
+
+// Import (ou mise à jour) du catalogue OJ Compagnie embarqué.
+route("POST", "/api/inventory/import-oj", async () => {
+  const db = await getDb();
+  const { importOjCatalog } = await import("./seed.js");
+  const result = await importOjCatalog(db);
+  return json({ importe: result });
+});
+
+route("GET", "/api/inventory", async (req) => {
+  const db = await getDb();
+  const url = new URL(req.url);
+  const q = url.searchParams.get("q");
+  const source = url.searchParams.get("source");
+  const clauses: string[] = ["active"];
+  const params: unknown[] = [];
+  if (q) {
+    params.push(`%${q}%`);
+    clauses.push(`(lower(name) LIKE lower($${params.length}) OR lower(coalesce(sku,'')) LIKE lower($${params.length}) OR lower(category) LIKE lower($${params.length}))`);
+  }
+  if (source) {
+    params.push(source);
+    clauses.push(`source = $${params.length}`);
+  }
+  const { rows } = await db.query<InventoryRow>(
+    `SELECT * FROM inventory_items WHERE ${clauses.join(" AND ")} ORDER BY source, category, name LIMIT 500`,
+    params,
+  );
+  const { rows: counts } = await db.query<{ source: string; n: string }>(
+    "SELECT source, count(*) AS n FROM inventory_items WHERE active GROUP BY source",
+  );
+  return json({
+    produits: rows.map(itemToJson),
+    comptes: Object.fromEntries(counts.map((c) => [c.source, Number(c.n)])),
+  });
+});
+
+route("POST", "/api/inventory", async (req) => {
+  const parsed = inventoryItemSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows } = await db.query<InventoryRow>(
+    `INSERT INTO inventory_items (sku, name, source, category, format, unit, quantity, cost_cents, notes)
+     VALUES ($1,$2,'manuel',$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [d.sku || null, d.name, d.category, d.format, d.unit, d.quantity, d.costCents, d.notes],
+  );
+  return json({ produit: itemToJson(rows[0]) }, 201);
+});
+
+route("PUT", "/api/inventory/:id", async (req, params) => {
+  const parsed = inventoryItemSchema.partial().safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const map: [string, unknown][] = [
+    ["sku", d.sku], ["name", d.name], ["category", d.category], ["format", d.format],
+    ["unit", d.unit], ["cost_cents", d.costCents], ["notes", d.notes],
+  ];
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [col, val] of map) {
+    if (val !== undefined) {
+      values.push(val);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(Number(params.id));
+  const { rows } = await db.query<InventoryRow>(
+    `UPDATE inventory_items SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (!rows[0]) return error("Produit introuvable.", 404);
+  return json({ produit: itemToJson(rows[0]) });
+});
+
+route("DELETE", "/api/inventory/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query(
+    "UPDATE inventory_items SET active = false WHERE id = $1 RETURNING id",
+    [Number(params.id)],
+  );
+  if (!rows.length) return error("Produit introuvable.", 404);
+  return json({ ok: true, desactive: Number(params.id) });
+});
+
+// Mouvement de stock : delta négatif = sortie, positif = entrée.
+route("POST", "/api/inventory/:id/movement", async (req, params) => {
+  const parsed = z
+    .object({ delta: z.number().refine((v) => v !== 0, "Le delta ne peut pas être 0"), reason: z.string().default("") })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const db = await getDb();
+  const id = Number(params.id);
+  const { rows: items } = await db.query<InventoryRow>(
+    "SELECT * FROM inventory_items WHERE id = $1 AND active",
+    [id],
+  );
+  if (!items[0]) return error("Produit introuvable.", 404);
+  const before = Number(items[0].quantity);
+  const after = before + parsed.data.delta;
+  if (after < 0) {
+    return error(`Stock insuffisant : ${before} ${items[0].unit} en stock, sortie demandée de ${-parsed.data.delta}.`, 400);
+  }
+  await db.query("INSERT INTO stock_movements (item_id, delta, reason) VALUES ($1,$2,$3)", [
+    id,
+    parsed.data.delta,
+    parsed.data.reason,
+  ]);
+  const { rows } = await db.query<InventoryRow>(
+    "UPDATE inventory_items SET quantity = quantity + $1 WHERE id = $2 RETURNING *",
+    [parsed.data.delta, id],
+  );
+  return json({ produit: itemToJson(rows[0]), quantiteAvant: before, quantiteApres: after });
+});
+
+route("GET", "/api/inventory/:id/movements", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query(
+    "SELECT id, delta, reason, created_at FROM stock_movements WHERE item_id = $1 ORDER BY id DESC LIMIT 100",
+    [Number(params.id)],
+  );
+  return json({ mouvements: rows });
+});
+
+// --- Commandes fournisseurs ---
+
+const orderSchema = z.object({
+  supplier: z.string().min(1, "Fournisseur requis"),
+  notes: z.string().default(""),
+  lines: z
+    .array(
+      z.object({
+        itemId: z.number().int().nullable().optional(),
+        description: z.string().min(1),
+        quantity: z.number().positive(),
+        unitCostCents: z.number().int().min(0),
+      }),
+    )
+    .min(1, "Au moins une ligne est requise"),
+});
+
+route("GET", "/api/orders", async () => {
+  const db = await getDb();
+  const { rows: orders } = await db.query(
+    "SELECT * FROM supplier_orders ORDER BY id DESC LIMIT 100",
+  );
+  const { rows: lines } = await db.query(
+    "SELECT * FROM supplier_order_items ORDER BY order_id, id",
+  );
+  return json({
+    commandes: (orders as any[]).map((o) => ({
+      id: o.id,
+      supplier: o.supplier,
+      status: o.status,
+      orderedOn: o.ordered_on ? toIsoDate(o.ordered_on) : null,
+      receivedOn: o.received_on ? toIsoDate(o.received_on) : null,
+      totalCents: o.total_cents,
+      notes: o.notes,
+      lines: (lines as any[])
+        .filter((l) => l.order_id === o.id)
+        .map((l) => ({
+          id: l.id,
+          itemId: l.item_id,
+          description: l.description,
+          quantity: Number(l.quantity),
+          unitCostCents: l.unit_cost_cents,
+          amountCents: l.amount_cents,
+        })),
+    })),
+  });
+});
+
+route("POST", "/api/orders", async (req) => {
+  const parsed = orderSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const total = d.lines.reduce((s, l) => s + Math.round(l.quantity * l.unitCostCents), 0);
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO supplier_orders (supplier, status, ordered_on, total_cents, notes)
+     VALUES ($1, 'commandée', CURRENT_DATE, $2, $3) RETURNING id`,
+    [d.supplier, total, d.notes],
+  );
+  for (const line of d.lines) {
+    await db.query(
+      `INSERT INTO supplier_order_items (order_id, item_id, description, quantity, unit_cost_cents, amount_cents)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [rows[0].id, line.itemId ?? null, line.description, line.quantity, line.unitCostCents, Math.round(line.quantity * line.unitCostCents)],
+    );
+  }
+  return json({ commande: { id: rows[0].id, totalCents: total } }, 201);
+});
+
+// Réception d'une commande : incrémente le stock des produits liés.
+route("POST", "/api/orders/:id/receive", async (_req, params) => {
+  const db = await getDb();
+  const id = Number(params.id);
+  const { rows: orders } = await db.query<{ id: number; status: string }>(
+    "SELECT id, status FROM supplier_orders WHERE id = $1",
+    [id],
+  );
+  if (!orders[0]) return error("Commande introuvable.", 404);
+  if (orders[0].status === "reçue") return error("Cette commande est déjà reçue.", 409);
+  const { rows: lines } = await db.query<{ item_id: number | null; quantity: string; description: string }>(
+    "SELECT item_id, quantity, description FROM supplier_order_items WHERE order_id = $1",
+    [id],
+  );
+  const incremented: { itemId: number; delta: number }[] = [];
+  for (const line of lines) {
+    if (line.item_id != null) {
+      await db.query("INSERT INTO stock_movements (item_id, delta, reason) VALUES ($1,$2,$3)", [
+        line.item_id,
+        Number(line.quantity),
+        `Réception commande #${id}`,
+      ]);
+      await db.query("UPDATE inventory_items SET quantity = quantity + $1 WHERE id = $2", [
+        Number(line.quantity),
+        line.item_id,
+      ]);
+      incremented.push({ itemId: line.item_id, delta: Number(line.quantity) });
+    }
+  }
+  await db.query(
+    "UPDATE supplier_orders SET status = 'reçue', received_on = CURRENT_DATE WHERE id = $1",
+    [id],
+  );
+  return json({ ok: true, stockIncremente: incremented });
+});
+
+// --- Finances : dépenses, revenus, rapport de marges ---
+
+const expenseSchema = z.object({
+  label: z.string().min(1, "Description requise"),
+  category: z.string().default("général"),
+  amountCents: z.number().int().min(1, "Montant requis"),
+  spentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes: z.string().default(""),
+});
+
+const revenueSchema = z.object({
+  label: z.string().min(1, "Description requise"),
+  amountCents: z.number().int().min(1, "Montant requis"),
+  receivedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes: z.string().default(""),
+});
+
+route("GET", "/api/expenses", async () => {
+  const db = await getDb();
+  const { rows } = await db.query("SELECT * FROM expenses ORDER BY spent_on DESC, id DESC LIMIT 200");
+  return json({
+    depenses: (rows as any[]).map((r) => ({
+      id: r.id, label: r.label, category: r.category,
+      amountCents: r.amount_cents, spentOn: toIsoDate(r.spent_on), notes: r.notes,
+    })),
+  });
+});
+
+route("POST", "/api/expenses", async (req) => {
+  const parsed = expenseSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO expenses (label, category, amount_cents, spent_on, notes)
+     VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5) RETURNING id`,
+    [d.label, d.category, d.amountCents, d.spentOn ?? null, d.notes],
+  );
+  return json({ depense: { id: rows[0].id } }, 201);
+});
+
+route("DELETE", "/api/expenses/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM expenses WHERE id = $1 RETURNING id", [Number(params.id)]);
+  if (!rows.length) return error("Dépense introuvable.", 404);
+  return json({ ok: true });
+});
+
+route("GET", "/api/revenues", async () => {
+  const db = await getDb();
+  const { rows } = await db.query("SELECT * FROM revenues ORDER BY received_on DESC, id DESC LIMIT 200");
+  return json({
+    revenus: (rows as any[]).map((r) => ({
+      id: r.id, label: r.label, amountCents: r.amount_cents,
+      receivedOn: toIsoDate(r.received_on), notes: r.notes,
+    })),
+  });
+});
+
+route("POST", "/api/revenues", async (req) => {
+  const parsed = revenueSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO revenues (label, amount_cents, received_on, notes)
+     VALUES ($1,$2,COALESCE($3::date, CURRENT_DATE),$4) RETURNING id`,
+    [d.label, d.amountCents, d.receivedOn ?? null, d.notes],
+  );
+  return json({ revenu: { id: rows[0].id } }, 201);
+});
+
+route("DELETE", "/api/revenues/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM revenues WHERE id = $1 RETURNING id", [Number(params.id)]);
+  if (!rows.length) return error("Revenu introuvable.", 404);
+  return json({ ok: true });
+});
+
+// Rapport de marges : revenus (factures payées + revenus manuels) − coûts (dépenses).
+route("GET", "/api/finances/report", async (req) => {
+  const db = await getDb();
+  const url = new URL(req.url);
+  const from = url.searchParams.get("du") ?? "1970-01-01";
+  const to = url.searchParams.get("au") ?? "2999-12-31";
+  const sum = async (sql: string, params: unknown[]) =>
+    Number((await db.query<{ s: string | null }>(sql, params)).rows[0].s ?? 0);
+
+  const facturesPayees = await sum(
+    `SELECT COALESCE(SUM(total_cents),0) AS s FROM documents
+     WHERE kind = 'facture' AND status = 'payée' AND issued_on BETWEEN $1::date AND $2::date`,
+    [from, to],
+  );
+  const revenusManuels = await sum(
+    "SELECT COALESCE(SUM(amount_cents),0) AS s FROM revenues WHERE received_on BETWEEN $1::date AND $2::date",
+    [from, to],
+  );
+  const depenses = await sum(
+    "SELECT COALESCE(SUM(amount_cents),0) AS s FROM expenses WHERE spent_on BETWEEN $1::date AND $2::date",
+    [from, to],
+  );
+  const { rows: parCategorie } = await db.query(
+    `SELECT category, SUM(amount_cents)::int AS total FROM expenses
+     WHERE spent_on BETWEEN $1::date AND $2::date GROUP BY category ORDER BY total DESC`,
+    [from, to],
+  );
+  const revenusTotal = facturesPayees + revenusManuels;
+  const marge = revenusTotal - depenses;
+  const margePct = revenusTotal > 0 ? Math.round((marge / revenusTotal) * 10000) / 100 : null;
+  return json({
+    du: from,
+    au: to,
+    revenus: { facturesPayees, revenusManuels, total: revenusTotal },
+    couts: { depenses, parCategorie },
+    marge,
+    margePct,
+  });
+});
+
+// --- Marketing : campagnes ---
+
+const campaignSchema = z.object({
+  name: z.string().min(1, "Nom de campagne requis"),
+  channel: z.string().default(""),
+  content: z.string().default(""),
+  launchOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date de lancement requise (AAAA-MM-JJ)"),
+});
+
+function campaignToJson(r: any) {
+  return {
+    id: r.id,
+    name: r.name,
+    channel: r.channel,
+    content: r.content,
+    launchOn: r.launch_on ? toIsoDate(r.launch_on) : null,
+    status: r.status,
+    createdAt: r.created_at,
+  };
+}
+
+route("GET", "/api/campaigns", async () => {
+  const db = await getDb();
+  const { rows } = await db.query("SELECT * FROM campaigns ORDER BY launch_on NULLS LAST, id DESC");
+  return json({ campagnes: (rows as any[]).map(campaignToJson) });
+});
+
+route("POST", "/api/campaigns", async (req) => {
+  const parsed = campaignSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const status = d.launchOn > today ? "planifiée" : "lancée";
+  const { rows } = await db.query(
+    `INSERT INTO campaigns (name, channel, content, launch_on, status)
+     VALUES ($1,$2,$3,$4::date,$5) RETURNING *`,
+    [d.name, d.channel, d.content, d.launchOn, status],
+  );
+  return json({ campagne: campaignToJson(rows[0]) }, 201);
+});
+
+route("PUT", "/api/campaigns/:id", async (req, params) => {
+  const parsed = campaignSchema
+    .partial()
+    .extend({ status: z.enum(["planifiée", "lancée", "terminée", "annulée"]).optional() })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const map: [string, unknown][] = [
+    ["name", d.name], ["channel", d.channel], ["content", d.content],
+    ["launch_on", d.launchOn], ["status", d.status],
+  ];
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [col, val] of map) {
+    if (val !== undefined) {
+      values.push(val);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(Number(params.id));
+  const { rows } = await db.query(
+    `UPDATE campaigns SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (!rows[0]) return error("Campagne introuvable.", 404);
+  return json({ campagne: campaignToJson(rows[0]) });
+});
+
+route("DELETE", "/api/campaigns/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM campaigns WHERE id = $1 RETURNING id", [Number(params.id)]);
+  if (!rows.length) return error("Campagne introuvable.", 404);
+  return json({ ok: true });
+});
 
 // ---------- Répartiteur ----------
 
