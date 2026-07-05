@@ -16,6 +16,8 @@ export interface Db {
   ): Promise<QueryResult<T>>;
 }
 
+export class DbNotProvisionedError extends Error {}
+
 let dbPromise: Promise<Db> | null = null;
 
 async function createDb(): Promise<Db> {
@@ -30,6 +32,12 @@ async function createDb(): Promise<Db> {
         return { rows: (Array.isArray(rows) ? rows : (rows as { rows: T[] }).rows) as T[] };
       },
     };
+  } else if (process.env.NETLIFY) {
+    // En production Netlify sans base : erreur explicite plutôt qu'un 500 opaque.
+    throw new DbNotProvisionedError(
+      "Netlify DB non provisionnée : ouvrez l'extension Neon du site (Extensions → Neon → Add database) " +
+        "ou exécutez « npx netlify db init », puis redéployez.",
+    );
   } else {
     const { PGlite } = await import("@electric-sql/pglite");
     let pg;
@@ -63,7 +71,14 @@ async function createDb(): Promise<Db> {
 }
 
 export function getDb(): Promise<Db> {
-  if (!dbPromise) dbPromise = createDb();
+  if (!dbPromise) {
+    dbPromise = createDb();
+    // Ne pas mettre en cache un échec : réessaie à la prochaine requête
+    // (utile quand la base vient tout juste d'être provisionnée).
+    dbPromise.catch(() => {
+      dbPromise = null;
+    });
+  }
   return dbPromise;
 }
 

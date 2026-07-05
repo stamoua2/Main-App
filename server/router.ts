@@ -2,7 +2,7 @@
 // (netlify/functions/api.ts), le serveur de développement local et les tests.
 
 import { z } from "zod";
-import { getDb } from "./db.js";
+import { DbNotProvisionedError, getDb } from "./db.js";
 import {
   authenticate,
   clearSessionCookie,
@@ -1218,6 +1218,7 @@ export async function handleApiRequest(req: Request): Promise<Response> {
       return await r.handler(req, (match.groups ?? {}) as Params, user as SessionUser);
     } catch (err) {
       console.error(`Erreur ${req.method} ${path}:`, err);
+      if (err instanceof DbNotProvisionedError) return error(err.message, 503);
       return error("Erreur interne du serveur.", 500);
     }
   }
