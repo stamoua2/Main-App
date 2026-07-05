@@ -68,7 +68,66 @@ export interface Forfait {
   tagline: string;
   popular: boolean;
   priceCents: number | null;
+  visitCount: number;
+  visitCostCents: number;
+  marginPct: number;
   items: string[];
+}
+
+export interface ProduitForfait {
+  id?: number;
+  itemId: number | null;
+  itemName?: string | null;
+  itemFormat?: string | null;
+  label: string;
+  dosePer100m2: number;
+  doseUnit: string;
+  formatQuantity: number;
+  applications: number;
+  unitCostCents: number | null;
+  formatCostCents: number;
+}
+
+export interface CotationForfait {
+  id: number;
+  slug: string;
+  name: string;
+  visits: string;
+  popular: boolean;
+  visitCount: number;
+  visitCostCents: number;
+  marginPct: number;
+  couts: { produitsCents: number; visitesCents: number; totalCents: number };
+  prixCents: number;
+  prixParVisiteCents: number;
+  produits: {
+    label: string;
+    applications: number;
+    dosePer100m2: number;
+    doseUnit: string;
+    quantiteTotale: number;
+    formats: number;
+    coutCents: number;
+  }[];
+}
+
+export interface Cotation {
+  superficie: { m2: number; ft2: number };
+  forfaits: CotationForfait[];
+}
+
+export interface ProduitInventaire {
+  id: number;
+  sku: string;
+  name: string;
+  source: string;
+  category: string;
+  format: string;
+  unit: string;
+  quantity: number;
+  costCents: number;
+  notes: string;
+  active: boolean;
 }
 
 export interface LigneDocument {

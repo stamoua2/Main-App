@@ -258,6 +258,30 @@ export const DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(spent_on)`,
   `CREATE INDEX IF NOT EXISTS idx_revenues_date ON revenues(received_on)`,
 
+  // ---- Calculateur de prix des forfaits ----
+  // Nombre de visites (numérique), coût fixe par visite (déplacement,
+  // main-d'œuvre) et marge de profit par défaut, ajustables par forfait.
+  `ALTER TABLE packages ADD COLUMN IF NOT EXISTS visit_count INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE packages ADD COLUMN IF NOT EXISTS visit_cost_cents INTEGER NOT NULL DEFAULT 2500`,
+  `ALTER TABLE packages ADD COLUMN IF NOT EXISTS margin_pct NUMERIC(6,2) NOT NULL DEFAULT 55`,
+
+  // Produits appliqués par forfait : dose par 100 m², contenance du format
+  // acheté et nombre d'applications par saison. Le coût vient du produit
+  // d'inventaire lié (item_id) ou, à défaut, de unit_cost_cents.
+  `CREATE TABLE IF NOT EXISTS package_products (
+    id SERIAL PRIMARY KEY,
+    package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES inventory_items(id) ON DELETE SET NULL,
+    label TEXT NOT NULL DEFAULT '',
+    dose_per_100m2 NUMERIC(12,4) NOT NULL DEFAULT 0,
+    dose_unit TEXT NOT NULL DEFAULT 'kg',
+    format_quantity NUMERIC(12,4) NOT NULL DEFAULT 1,
+    applications INTEGER NOT NULL DEFAULT 1,
+    unit_cost_cents INTEGER,
+    position INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_package_products_pkg ON package_products(package_id)`,
+
   `CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)`,
   `CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id)`,
   `CREATE INDEX IF NOT EXISTS idx_document_lines_doc ON document_lines(document_id)`,

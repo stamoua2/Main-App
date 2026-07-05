@@ -71,6 +71,92 @@ export const SITE_SERVICES: { name: string; description: string }[] = [
   { name: "Biostimulant", description: "Stimule naturellement la croissance des racines et la vie microbienne du sol pour une pelouse plus résistante, plus dense et plus vigoureuse." },
 ];
 
+// Produits appliqués par défaut pour le calculateur de prix — PLACE-HOLDER
+// raisonnable basé sur le catalogue OJ Compagnie 2026, entièrement ajustable
+// dans l'interface (page Forfaits). Doses par 100 m² pour UNE application.
+// Insérés seulement si le forfait n'a encore aucun produit configuré (les
+// ajustements faits dans l'app ne sont jamais écrasés par le seed).
+export interface SeedPackageProduct {
+  /** Nom + format du produit d'inventaire OJ à lier (source 'oj'). */
+  itemName: string;
+  itemFormat: string;
+  label: string;
+  dosePer100m2: number;
+  doseUnit: string;
+  /** Contenance du format acheté (ex. « 2 x 10 L » → 20). */
+  formatQuantity: number;
+  applications: number;
+}
+
+const ENGRAIS: Omit<SeedPackageProduct, "applications"> = {
+  itemName: "OJ Performance 21-3-7 25 % Nutryon-S 40 % DefeNd",
+  itemFormat: "25 kg (55 lbs)",
+  label: "Fertilisation — OJ 21-3-7",
+  dosePer100m2: 3.5,
+  doseUnit: "kg",
+  formatQuantity: 25,
+};
+
+const FIESTA: Omit<SeedPackageProduct, "applications"> = {
+  itemName: "Fiesta",
+  itemFormat: "2 x 10 L",
+  label: "Contrôle des mauvaises herbes — Fiesta",
+  dosePer100m2: 0.7,
+  doseUnit: "L",
+  formatQuantity: 20,
+};
+
+const FONDATION: Omit<SeedPackageProduct, "applications"> = {
+  itemName: "Fondation, mélange d'acides organiques",
+  itemFormat: "2 x 10 L",
+  label: "Fondation — biostimulant de sol",
+  dosePer100m2: 1,
+  doseUnit: "L",
+  formatQuantity: 20,
+};
+
+export const DEFAULT_PACKAGE_PRODUCTS: Record<string, SeedPackageProduct[]> = {
+  essentiel: [
+    { ...ENGRAIS, applications: 3 },
+    { ...FIESTA, applications: 2 },
+  ],
+  regulier: [
+    { ...ENGRAIS, applications: 3 },
+    { ...FIESTA, applications: 3 },
+    { ...FONDATION, applications: 1 },
+  ],
+  elite: [
+    { ...ENGRAIS, applications: 4 },
+    { ...FIESTA, applications: 3 },
+    { ...FONDATION, applications: 1 },
+    {
+      itemName: "OJ Performance 16-32-6 25 % Nutryon-S",
+      itemFormat: "25 kg (55 lbs)",
+      label: "Engrais enracineur — OJ 16-32-6",
+      dosePer100m2: 3,
+      doseUnit: "kg",
+      formatQuantity: 25,
+      applications: 1,
+    },
+    {
+      itemName: "OJ Extreme Green — 30 % Pâturin, 40 % Fétuque, 30 % Raygrass",
+      itemFormat: "10 kg (22 lbs)",
+      label: "Sursemis — semences OJ Extreme Green",
+      dosePer100m2: 1.5,
+      doseUnit: "kg",
+      formatQuantity: 10,
+      applications: 1,
+    },
+  ],
+};
+
+// Nombre de visites numérique par forfait (pour le coût des déplacements).
+export const PACKAGE_VISIT_COUNTS: Record<string, number> = {
+  essentiel: 3,
+  regulier: 4,
+  elite: 5,
+};
+
 export const SEED_ALEX = {
   email: "alex@stamourduvert.com",
   name: "Alex St-Amour",

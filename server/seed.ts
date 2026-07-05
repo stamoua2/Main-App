@@ -2,7 +2,14 @@
 
 import type { Db } from "./db.js";
 import { hashPassword } from "./auth.js";
-import { SEED_ALEX, SEED_TEST_CLIENTS, SITE_PACKAGES, SITE_SERVICES } from "./seed-data.js";
+import {
+  DEFAULT_PACKAGE_PRODUCTS,
+  PACKAGE_VISIT_COUNTS,
+  SEED_ALEX,
+  SEED_TEST_CLIENTS,
+  SITE_PACKAGES,
+  SITE_SERVICES,
+} from "./seed-data.js";
 import { OJ_CATALOG } from "./oj-catalog.js";
 
 /**
@@ -87,8 +94,46 @@ export async function seedAll(db: Db, options: { alexPassword?: string } = {}): 
     );
   }
 
+  // Nombre de visites numérique (coût des déplacements du calculateur)
+  for (const [slug, count] of Object.entries(PACKAGE_VISIT_COUNTS)) {
+    await db.query("UPDATE packages SET visit_count = $1 WHERE slug = $2 AND visit_count = 0", [
+      count,
+      slug,
+    ]);
+  }
+
   // Catalogue OJ Compagnie
   await importOjCatalog(db);
+
+  // Produits appliqués par défaut (calculateur de prix) — seulement pour les
+  // forfaits qui n'en ont encore aucun : les ajustements faits dans l'app
+  // ne sont jamais écrasés.
+  for (const [slug, products] of Object.entries(DEFAULT_PACKAGE_PRODUCTS)) {
+    const { rows: pkgRows } = await db.query<{ id: number }>(
+      "SELECT id FROM packages WHERE slug = $1",
+      [slug],
+    );
+    if (!pkgRows.length) continue;
+    const packageId = pkgRows[0].id;
+    const { rows: existing } = await db.query<{ n: string }>(
+      "SELECT count(*) AS n FROM package_products WHERE package_id = $1",
+      [packageId],
+    );
+    if (Number(existing[0].n) > 0) continue;
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const { rows: itemRows } = await db.query<{ id: number }>(
+        "SELECT id FROM inventory_items WHERE source = 'oj' AND name = $1 AND format = $2",
+        [p.itemName, p.itemFormat],
+      );
+      await db.query(
+        `INSERT INTO package_products (package_id, item_id, label, dose_per_100m2, dose_unit,
+           format_quantity, applications, position)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [packageId, itemRows[0]?.id ?? null, p.label, p.dosePer100m2, p.doseUnit, p.formatQuantity, p.applications, i],
+      );
+    }
+  }
 
   // Clients test avec adresses réelles de la région
   for (const client of SEED_TEST_CLIENTS) {

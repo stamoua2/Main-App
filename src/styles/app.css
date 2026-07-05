@@ -237,6 +237,10 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
 
 .pkg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
 
+/* Éditeur de produits des forfaits : borne la largeur du sélecteur
+   d'inventaire (les noms de produits OJ sont très longs). */
+.data select { max-width: 300px; }
+
 .pkg-card {
   background: #fff;
   border: 1px solid var(--border-2);

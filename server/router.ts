@@ -21,6 +21,8 @@ import {
   verifySquareSignature,
 } from "./square.js";
 import { MapsError, geocodeAddress, optimizeRoute, type GeoPoint } from "./routesapi.js";
+import { coutForfait, prixDepuisMarge, type ProduitApplique } from "../shared/pricing.js";
+import { M2_TO_FT2 } from "../shared/area.js";
 
 type Params = Record<string, string>;
 type Handler = (req: Request, params: Params, user: SessionUser) => Promise<Response>;
@@ -495,12 +497,17 @@ route("PUT", "/api/settings", async (req) => {
 
 // --- Forfaits ---
 
+interface PackageRow {
+  id: number; slug: string; name: string; visits: string; tagline: string;
+  popular: boolean; position: number; price_cents: number | null;
+  visit_count: number; visit_cost_cents: number; margin_pct: string | number;
+}
+
 route("GET", "/api/packages", async () => {
   const db = await getDb();
-  const { rows: packages } = await db.query<{
-    id: number; slug: string; name: string; visits: string; tagline: string;
-    popular: boolean; position: number; price_cents: number | null;
-  }>("SELECT * FROM packages WHERE active ORDER BY position");
+  const { rows: packages } = await db.query<PackageRow>(
+    "SELECT * FROM packages WHERE active ORDER BY position",
+  );
   const { rows: items } = await db.query<{ package_id: number; position: number; label: string }>(
     "SELECT package_id, position, label FROM package_items ORDER BY package_id, position",
   );
@@ -513,8 +520,216 @@ route("GET", "/api/packages", async () => {
       tagline: p.tagline,
       popular: p.popular,
       priceCents: p.price_cents,
+      visitCount: p.visit_count,
+      visitCostCents: p.visit_cost_cents,
+      marginPct: Number(p.margin_pct),
       items: items.filter((i) => i.package_id === p.id).map((i) => i.label),
     })),
+  });
+});
+
+// --- Calculateur de prix des forfaits ---
+
+const packagePricingSchema = z.object({
+  marginPct: z.number().min(0).max(95).optional(),
+  visitCostCents: z.number().int().min(0).optional(),
+  visitCount: z.number().int().min(0).max(30).optional(),
+});
+
+const packageProductSchema = z.object({
+  itemId: z.number().int().nullable().optional(),
+  label: z.string().min(1, "Nom du produit requis"),
+  dosePer100m2: z.number().min(0),
+  doseUnit: z.string().max(20).default("kg"),
+  formatQuantity: z.number().positive("Contenance du format requise"),
+  applications: z.number().int().min(1).max(30).default(1),
+  unitCostCents: z.number().int().min(0).nullable().optional(),
+});
+
+// Paramètres de prix d'un forfait : marge, coût et nombre de visites.
+route("PUT", "/api/packages/:id", async (req, params) => {
+  const parsed = packagePricingSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  const map: [string, unknown][] = [
+    ["margin_pct", d.marginPct],
+    ["visit_cost_cents", d.visitCostCents],
+    ["visit_count", d.visitCount],
+  ];
+  for (const [col, val] of map) {
+    if (val !== undefined) {
+      values.push(val);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(Number(params.id));
+  const { rows } = await db.query<PackageRow>(
+    `UPDATE packages SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (!rows.length) return error("Forfait introuvable.", 404);
+  const p = rows[0];
+  return json({
+    forfait: {
+      id: p.id, slug: p.slug, name: p.name,
+      visitCount: p.visit_count, visitCostCents: p.visit_cost_cents, marginPct: Number(p.margin_pct),
+    },
+  });
+});
+
+interface PackageProductRow {
+  id: number;
+  package_id: number;
+  item_id: number | null;
+  label: string;
+  dose_per_100m2: string | number;
+  dose_unit: string;
+  format_quantity: string | number;
+  applications: number;
+  unit_cost_cents: number | null;
+  position: number;
+  item_name: string | null;
+  item_format: string | null;
+  item_cost_cents: number | null;
+}
+
+const PACKAGE_PRODUCT_SELECT = `SELECT pp.*, i.name AS item_name, i.format AS item_format,
+    i.cost_cents AS item_cost_cents
+  FROM package_products pp LEFT JOIN inventory_items i ON i.id = pp.item_id`;
+
+function packageProductToJson(row: PackageProductRow) {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    itemName: row.item_name,
+    itemFormat: row.item_format,
+    label: row.label,
+    dosePer100m2: Number(row.dose_per_100m2),
+    doseUnit: row.dose_unit,
+    formatQuantity: Number(row.format_quantity),
+    applications: row.applications,
+    unitCostCents: row.unit_cost_cents,
+    // Coût effectif d'un format : produit d'inventaire lié, sinon coût manuel.
+    formatCostCents: row.item_cost_cents ?? row.unit_cost_cents ?? 0,
+  };
+}
+
+route("GET", "/api/packages/:id/products", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query<PackageProductRow>(
+    `${PACKAGE_PRODUCT_SELECT} WHERE pp.package_id = $1 ORDER BY pp.position, pp.id`,
+    [Number(params.id)],
+  );
+  return json({ produits: rows.map(packageProductToJson) });
+});
+
+// Remplace la liste complète des produits appliqués d'un forfait.
+route("PUT", "/api/packages/:id/products", async (req, params) => {
+  const parsed = z
+    .object({ produits: z.array(packageProductSchema) })
+    .safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const packageId = Number(params.id);
+  const db = await getDb();
+  const { rows: pkg } = await db.query("SELECT id FROM packages WHERE id = $1", [packageId]);
+  if (!pkg.length) return error("Forfait introuvable.", 404);
+  await db.query("DELETE FROM package_products WHERE package_id = $1", [packageId]);
+  for (let i = 0; i < parsed.data.produits.length; i++) {
+    const p = parsed.data.produits[i];
+    await db.query(
+      `INSERT INTO package_products (package_id, item_id, label, dose_per_100m2, dose_unit,
+         format_quantity, applications, unit_cost_cents, position)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [packageId, p.itemId ?? null, p.label, p.dosePer100m2, p.doseUnit, p.formatQuantity,
+       p.applications, p.unitCostCents ?? null, i],
+    );
+  }
+  const { rows } = await db.query<PackageProductRow>(
+    `${PACKAGE_PRODUCT_SELECT} WHERE pp.package_id = $1 ORDER BY pp.position, pp.id`,
+    [packageId],
+  );
+  return json({ produits: rows.map(packageProductToJson) });
+});
+
+// Cotation rapide : coût + prix suggéré des 3 forfaits pour une superficie.
+// Superficie fournie en m² (areaM2), en pi² (areaFt2) ou tirée d'un client.
+route("GET", "/api/pricing/quote", async (req) => {
+  const url = new URL(req.url);
+  const db = await getDb();
+  let areaM2 = Number(url.searchParams.get("areaM2")) || 0;
+  if (!areaM2) {
+    const ft2 = Number(url.searchParams.get("areaFt2")) || 0;
+    if (ft2 > 0) areaM2 = ft2 / M2_TO_FT2;
+  }
+  const clientId = Number(url.searchParams.get("clientId")) || 0;
+  if (!areaM2 && clientId) {
+    const { rows } = await db.query<{ lot_area_m2: number | null }>(
+      "SELECT lot_area_m2 FROM clients WHERE id = $1",
+      [clientId],
+    );
+    if (!rows.length) return error("Client introuvable.", 404);
+    areaM2 = Number(rows[0].lot_area_m2) || 0;
+  }
+  if (!(areaM2 > 0)) {
+    return error("Superficie requise (areaM2, areaFt2 ou clientId avec superficie mesurée).", 400);
+  }
+
+  const { rows: packages } = await db.query<PackageRow>(
+    "SELECT * FROM packages WHERE active ORDER BY position",
+  );
+  const { rows: productRows } = await db.query<PackageProductRow>(
+    `${PACKAGE_PRODUCT_SELECT} ORDER BY pp.package_id, pp.position, pp.id`,
+  );
+
+  const forfaits = packages.map((p) => {
+    const produits: ProduitApplique[] = productRows
+      .filter((r) => r.package_id === p.id)
+      .map((r) => ({
+        label: r.label,
+        dosePer100m2: Number(r.dose_per_100m2),
+        doseUnit: r.dose_unit,
+        formatQuantity: Number(r.format_quantity),
+        formatCostCents: r.item_cost_cents ?? r.unit_cost_cents ?? 0,
+        applications: r.applications,
+      }));
+    const marginPct = Number(p.margin_pct);
+    const couts = coutForfait(produits, areaM2, p.visit_count, p.visit_cost_cents);
+    const prixCents = prixDepuisMarge(couts.totalCents, marginPct);
+    return {
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      visits: p.visits,
+      popular: p.popular,
+      visitCount: p.visit_count,
+      visitCostCents: p.visit_cost_cents,
+      marginPct,
+      couts: {
+        produitsCents: couts.produitsCents,
+        visitesCents: couts.visitesCents,
+        totalCents: couts.totalCents,
+      },
+      prixCents,
+      prixParVisiteCents: p.visit_count > 0 ? Math.round(prixCents / p.visit_count) : prixCents,
+      produits: couts.details.map((d) => ({
+        label: d.label,
+        applications: d.applications,
+        dosePer100m2: d.dosePer100m2,
+        doseUnit: d.doseUnit,
+        quantiteTotale: d.quantiteTotale,
+        formats: d.formats,
+        coutCents: d.coutCents,
+      })),
+    };
+  });
+
+  return json({
+    superficie: { m2: areaM2, ft2: areaM2 * M2_TO_FT2 },
+    forfaits,
   });
 });
 
