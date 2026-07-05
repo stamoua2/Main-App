@@ -208,6 +208,12 @@ export const DDL: string[] = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
 
+  // ---- Connexion par nom d'utilisateur ----
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT NOT NULL DEFAULT ''`,
+  // Rattrapage des comptes créés avant l'ajout : partie locale du courriel.
+  `UPDATE users SET username = lower(split_part(email, '@', 1)) WHERE username = ''`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(lower(username))`,
+
   // ---- Passe 2 : ajouts (idempotents) ----
   `ALTER TABLE settings ADD COLUMN IF NOT EXISTS square_location_id TEXT NOT NULL DEFAULT ''`,
   `ALTER TABLE settings ADD COLUMN IF NOT EXISTS base_address TEXT NOT NULL DEFAULT '33, chemin du Graphite, L''Ange-Gardien (Québec) J8L 3J6'`,

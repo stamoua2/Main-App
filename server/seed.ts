@@ -49,7 +49,7 @@ export async function seedAll(db: Db, options: { alexPassword?: string } = {}): 
   );
   if (existingAlex.length === 0) {
     await db.query(
-      "INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, 'admin')",
+      "INSERT INTO users (username, email, name, password_hash, role) VALUES ('alex', $1, $2, $3, 'admin')",
       [SEED_ALEX.email, SEED_ALEX.name, hashPassword(alexPassword)],
     );
   }

@@ -10,6 +10,7 @@ const SESSION_DAYS = 14;
 
 export interface SessionUser {
   id: number;
+  username: string;
   email: string;
   name: string;
   role: string;
@@ -33,6 +34,7 @@ export function verifyPassword(password: string, hash: string): boolean {
 export async function createSessionCookie(user: SessionUser): Promise<string> {
   const jwt = await new SignJWT({
     sub: String(user.id),
+    username: user.username,
     email: user.email,
     name: user.name,
     role: user.role,
@@ -74,6 +76,7 @@ export async function getSessionUser(req: Request): Promise<SessionUser | null> 
     const { payload } = await jwtVerify(token, secretKey());
     return {
       id: Number(payload.sub),
+      username: String(payload.username ?? ""),
       email: String(payload.email ?? ""),
       name: String(payload.name ?? ""),
       role: String(payload.role ?? "admin"),
@@ -83,22 +86,26 @@ export async function getSessionUser(req: Request): Promise<SessionUser | null> 
   }
 }
 
+/** Connexion par nom d'utilisateur (ou courriel, toujours accepté). */
 export async function authenticate(
-  email: string,
+  identifier: string,
   password: string,
 ): Promise<SessionUser | null> {
   const db = await getDb();
   const { rows } = await db.query<{
     id: number;
+    username: string;
     email: string;
     name: string;
     role: string;
     password_hash: string;
-  }>("SELECT id, email, name, role, password_hash FROM users WHERE lower(email) = lower($1)", [
-    email,
-  ]);
+  }>(
+    `SELECT id, username, email, name, role, password_hash FROM users
+     WHERE lower(username) = lower($1) OR lower(email) = lower($1)`,
+    [identifier],
+  );
   const user = rows[0];
   if (!user) return null;
   if (!verifyPassword(password, user.password_hash)) return null;
-  return { id: user.id, email: user.email, name: user.name, role: user.role };
+  return { id: user.id, username: user.username, email: user.email, name: user.name, role: user.role };
 }

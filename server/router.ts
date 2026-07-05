@@ -46,15 +46,35 @@ async function body(req: Request): Promise<unknown> {
 
 // ---------- Schémas de validation ----------
 
-const loginSchema = z.object({
-  email: z.string().email("Courriel invalide"),
-  password: z.string().min(1, "Mot de passe requis"),
-});
+// Connexion par nom d'utilisateur; le champ `email` reste accepté pour
+// rétrocompatibilité (les deux identifient le compte).
+const loginSchema = z
+  .object({
+    identifiant: z.string().min(1).optional(),
+    email: z.string().min(1).optional(),
+    password: z.string().min(1, "Mot de passe requis"),
+  })
+  .refine((d) => d.identifiant || d.email, { message: "Nom d'utilisateur requis" });
+
+const usernameSchema = z
+  .string()
+  .min(3, "Le nom d'utilisateur doit contenir au moins 3 caractères")
+  .max(30, "Nom d'utilisateur trop long (30 max)")
+  .regex(/^[a-z0-9._-]+$/i, "Nom d'utilisateur : lettres, chiffres, . _ - seulement")
+  .transform((v) => v.toLowerCase());
 
 const userSchema = z.object({
-  email: z.string().email("Courriel invalide"),
+  username: usernameSchema,
+  email: z.string().email("Courriel invalide").or(z.literal("")).default(""),
   name: z.string().min(1, "Nom requis"),
   password: z.string().min(8, "Le mot de passe doit contenir au moins 8 caractères"),
+});
+
+const userUpdateSchema = z.object({
+  username: usernameSchema.optional(),
+  email: z.string().email("Courriel invalide").or(z.literal("")).optional(),
+  name: z.string().min(1, "Nom requis").optional(),
+  password: z.string().min(8, "Le mot de passe doit contenir au moins 8 caractères").optional(),
 });
 
 const clientSchema = z.object({
@@ -287,8 +307,9 @@ route(
   async (req) => {
     const parsed = loginSchema.safeParse(await body(req));
     if (!parsed.success) return error(parsed.error.issues[0].message, 400);
-    const user = await authenticate(parsed.data.email, parsed.data.password);
-    if (!user) return error("Courriel ou mot de passe invalide.", 401);
+    const identifier = parsed.data.identifiant ?? parsed.data.email ?? "";
+    const user = await authenticate(identifier, parsed.data.password);
+    if (!user) return error("Nom d'utilisateur ou mot de passe invalide.", 401);
     return json({ utilisateur: user }, 200, { "set-cookie": await createSessionCookie(user) });
   },
   { auth: false },
@@ -352,26 +373,89 @@ route("GET", "/api/config", async () =>
 route("GET", "/api/users", async () => {
   const db = await getDb();
   const { rows } = await db.query(
-    "SELECT id, email, name, role, created_at FROM users ORDER BY id",
+    "SELECT id, username, email, name, role, created_at FROM users ORDER BY id",
   );
   return json({ utilisateurs: rows });
 });
 
+async function usernameTaken(username: string, excludeId?: number): Promise<boolean> {
+  const db = await getDb();
+  const { rows } = await db.query<{ id: number }>(
+    "SELECT id FROM users WHERE lower(username) = lower($1)",
+    [username],
+  );
+  return rows.some((r) => r.id !== excludeId);
+}
+
 route("POST", "/api/users", async (req) => {
   const parsed = userSchema.safeParse(await body(req));
   if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
   const db = await getDb();
-  const { rows: existing } = await db.query(
-    "SELECT id FROM users WHERE lower(email) = lower($1)",
-    [parsed.data.email],
-  );
-  if (existing.length) return error("Un utilisateur avec ce courriel existe déjà.", 409);
+  if (await usernameTaken(d.username)) {
+    return error("Ce nom d'utilisateur est déjà pris.", 409);
+  }
+  if (d.email) {
+    const { rows: existing } = await db.query(
+      "SELECT id FROM users WHERE email != '' AND lower(email) = lower($1)",
+      [d.email],
+    );
+    if (existing.length) return error("Un utilisateur avec ce courriel existe déjà.", 409);
+  }
   const { rows } = await db.query(
-    `INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, 'admin')
-     RETURNING id, email, name, role, created_at`,
-    [parsed.data.email, parsed.data.name, hashPassword(parsed.data.password)],
+    `INSERT INTO users (username, email, name, password_hash, role) VALUES ($1, $2, $3, $4, 'admin')
+     RETURNING id, username, email, name, role, created_at`,
+    [d.username, d.email, d.name, hashPassword(d.password)],
   );
   return json({ utilisateur: rows[0] }, 201);
+});
+
+// Mise à jour d'un utilisateur (nom, nom d'utilisateur, courriel,
+// et réinitialisation du mot de passe si fourni).
+route("PUT", "/api/users/:id", async (req, params) => {
+  const parsed = userUpdateSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const id = Number(params.id);
+  const db = await getDb();
+  const { rows: existing } = await db.query("SELECT id FROM users WHERE id = $1", [id]);
+  if (!existing.length) return error("Utilisateur introuvable.", 404);
+  if (d.username && (await usernameTaken(d.username, id))) {
+    return error("Ce nom d'utilisateur est déjà pris.", 409);
+  }
+  const map: [string, unknown][] = [
+    ["username", d.username],
+    ["email", d.email],
+    ["name", d.name],
+    ["password_hash", d.password !== undefined ? hashPassword(d.password) : undefined],
+  ];
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [col, val] of map) {
+    if (val !== undefined) {
+      values.push(val);
+      sets.push(`${col} = $${values.length}`);
+    }
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(id);
+  const { rows } = await db.query(
+    `UPDATE users SET ${sets.join(", ")} WHERE id = $${values.length}
+     RETURNING id, username, email, name, role, created_at`,
+    values,
+  );
+  return json({ utilisateur: rows[0], motDePasseChange: d.password !== undefined });
+});
+
+route("DELETE", "/api/users/:id", async (_req, params, user) => {
+  const id = Number(params.id);
+  if (id === user.id) return error("Vous ne pouvez pas supprimer votre propre compte.", 400);
+  const db = await getDb();
+  const { rows: all } = await db.query<{ n: string }>("SELECT count(*) AS n FROM users");
+  if (Number(all[0].n) <= 1) return error("Impossible de supprimer le dernier utilisateur.", 400);
+  const { rows } = await db.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]);
+  if (!rows.length) return error("Utilisateur introuvable.", 404);
+  return json({ ok: true, supprime: id });
 });
 
 // --- Paramètres ---

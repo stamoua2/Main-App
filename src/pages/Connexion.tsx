@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError, type Utilisateur } from "../api";
 
 export default function Connexion({ onConnecte }: { onConnecte: (u: Utilisateur) => void }) {
-  const [email, setEmail] = useState("");
+  const [identifiant, setIdentifiant] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [erreur, setErreur] = useState("");
   const [enCours, setEnCours] = useState(false);
@@ -13,7 +13,7 @@ export default function Connexion({ onConnecte }: { onConnecte: (u: Utilisateur)
     setEnCours(true);
     try {
       const r = await api.post<{ utilisateur: Utilisateur }>("/api/auth/login", {
-        email,
+        identifiant,
         password: motDePasse,
       });
       onConnecte(r.utilisateur);
@@ -31,12 +31,12 @@ export default function Connexion({ onConnecte }: { onConnecte: (u: Utilisateur)
         <div className="brand-sub">Gestionnaire d'entreprise</div>
         <form onSubmit={soumettre}>
           <label className="field">
-            Courriel
+            Nom d'utilisateur
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={identifiant}
+              onChange={(e) => setIdentifiant(e.target.value)}
               autoComplete="username"
+              placeholder="ex. : alex"
               required
             />
           </label>
