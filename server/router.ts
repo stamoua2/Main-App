@@ -303,6 +303,35 @@ route(
 
 route("GET", "/api/auth/me", async (_req, _params, user) => json({ utilisateur: user }));
 
+// --- Diagnostic (aucune donnée sensible) ---
+
+route(
+  "GET",
+  "/api/health",
+  async () => {
+    const dbUrlSource = process.env.DATABASE_URL
+      ? "DATABASE_URL"
+      : process.env.NETLIFY_DATABASE_URL
+        ? "NETLIFY_DATABASE_URL"
+        : "aucune (PGlite locale)";
+    try {
+      const db = await getDb();
+      const { rows } = await db.query<{ n: string }>("SELECT count(*) AS n FROM users");
+      return json({ ok: true, base: dbUrlSource, utilisateurs: Number(rows[0].n) });
+    } catch (err) {
+      return json(
+        {
+          ok: false,
+          base: dbUrlSource,
+          erreur: err instanceof Error ? `${err.constructor.name}: ${err.message.slice(0, 300)}` : String(err),
+        },
+        500,
+      );
+    }
+  },
+  { auth: false },
+);
+
 // --- Configuration cliente (clé Google Maps servie aux utilisateurs connectés) ---
 
 route("GET", "/api/config", async () =>
