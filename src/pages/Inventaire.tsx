@@ -70,9 +70,6 @@ export default function Inventaire() {
   const [edition, setEdition] = useState<FormProduit>(PRODUIT_VIDE);
   const [gererCategories, setGererCategories] = useState(false);
   const [nouvelleCategorie, setNouvelleCategorie] = useState("");
-  // Ajustement de stock « bulk » (quantité + raison) affiché en ligne sous le
-  // produit concerné — jamais en haut de la page.
-  const [ajuste, setAjuste] = useState<{ id: number; delta: string; reason: string } | null>(null);
   const [stockEnCours, setStockEnCours] = useState<number | null>(null);
   const [erreur, setErreur] = useState("");
   const [message, setMessage] = useState("");
@@ -210,16 +207,11 @@ export default function Inventaire() {
     }
   }
 
-  async function appliquerAjustement(e: FormEvent, p: ProduitInventaire) {
-    e.preventDefault();
-    if (!ajuste) return;
-    const delta = Number(ajuste.delta.replace(",", "."));
-    if (!Number.isFinite(delta) || delta === 0) {
-      setErreur("Entrez une quantité différente de 0 (négatif = sortie).");
-      return;
-    }
-    await ajusterStock(p, delta, ajuste.reason);
-    setAjuste(null);
+  // Fixe la quantité exacte en stock (saisie directe du nombre) : calcule le
+  // mouvement nécessaire pour atteindre la cible.
+  async function definirStock(p: ProduitInventaire, cible: number) {
+    if (!Number.isFinite(cible) || cible < 0 || cible === p.quantity) return;
+    await ajusterStock(p, cible - p.quantity, "Mise à jour manuelle du stock");
   }
 
   // Sélecteur d'unité : liste contrôlée + conserve une valeur héritée hors liste
@@ -348,7 +340,7 @@ export default function Inventaire() {
       <p style={{ color: "var(--muted)", marginTop: -10 }}>
         {comptes.oj ?? 0} produits du catalogue OJ Compagnie (liste de prix 2026) ·{" "}
         {comptes.manuel ?? 0} produits ajoutés manuellement. Ajustez le stock avec les
-        boutons +/− à côté de chaque article.
+        boutons +/− ou tapez la quantité directement dans la colonne « En stock ».
       </p>
 
       {gererCategories && (
@@ -472,9 +464,9 @@ export default function Inventaire() {
                   </tr>
                 </thead>
                 <tbody>
-                  {groupes.get(nom)!.flatMap((p) => {
+                  {groupes.get(nom)!.map((p) => {
                     const enCours = stockEnCours === p.id;
-                    const lignes = [
+                    return (
                       <tr key={p.id}>
                         <td>
                           {p.name}{" "}
@@ -493,9 +485,30 @@ export default function Inventaire() {
                             >
                               −
                             </button>
-                            <span className="qty">
-                              {p.quantity} <span className="qty-unit">{p.unit}</span>
-                            </span>
+                            <input
+                              className="qty-input"
+                              key={`q-${p.id}-${p.quantity}`}
+                              defaultValue={p.quantity}
+                              inputMode="decimal"
+                              aria-label={`Stock de ${p.name} (${p.unit})`}
+                              title="Tapez la quantité exacte puis Entrée"
+                              disabled={enCours}
+                              onInput={(e) => {
+                                e.currentTarget.value = e.currentTarget.value.replace(/[^\d.,]/g, "");
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") e.currentTarget.blur();
+                              }}
+                              onBlur={(e) => {
+                                const cible = Number(e.currentTarget.value.replace(",", "."));
+                                if (!Number.isFinite(cible) || cible < 0) {
+                                  e.currentTarget.value = String(p.quantity);
+                                  return;
+                                }
+                                if (cible !== p.quantity) definirStock(p, cible);
+                              }}
+                            />
+                            <span className="qty-unit">{p.unit}</span>
                             <button
                               type="button"
                               aria-label={`Ajouter 1 ${p.unit}`}
@@ -510,17 +523,6 @@ export default function Inventaire() {
                           <div className="row-actions">
                             <button
                               className="btn secondary small"
-                              title="Entrée/sortie de stock (quantité + raison)"
-                              onClick={() =>
-                                setAjuste(
-                                  ajuste?.id === p.id ? null : { id: p.id, delta: "", reason: "" },
-                                )
-                              }
-                            >
-                              Ajuster le stock
-                            </button>
-                            <button
-                              className="btn secondary small"
                               title="Modifier la fiche du produit (nom, unité, format, coût…)"
                               onClick={() => ouvrirEdition(p)}
                             >
@@ -531,45 +533,8 @@ export default function Inventaire() {
                             </button>
                           </div>
                         </td>
-                      </tr>,
-                    ];
-                    if (ajuste?.id === p.id) {
-                      lignes.push(
-                        <tr key={`${p.id}-ajuste`} className="inline-edit-row">
-                          <td colSpan={6}>
-                            <form className="toolbar" onSubmit={(e) => appliquerAjustement(e, p)}>
-                              <label className="field" style={{ flex: "0 0 160px" }}>
-                                Quantité (± )
-                                <input
-                                  value={ajuste.delta}
-                                  onChange={(e) =>
-                                    setAjuste({ ...ajuste, delta: e.target.value.replace(/[^\d.,-]/g, "") })
-                                  }
-                                  inputMode="numeric"
-                                  placeholder="ex. : 10 ou -3"
-                                  autoFocus
-                                />
-                              </label>
-                              <label className="field" style={{ flex: "1 1 240px" }}>
-                                Raison (optionnel)
-                                <input
-                                  value={ajuste.reason}
-                                  onChange={(e) => setAjuste({ ...ajuste, reason: e.target.value })}
-                                  placeholder="ex. : réception commande, visite client…"
-                                />
-                              </label>
-                              <button className="btn" type="submit" disabled={enCours}>
-                                Appliquer
-                              </button>
-                              <button className="btn secondary" type="button" onClick={() => setAjuste(null)}>
-                                Annuler
-                              </button>
-                            </form>
-                          </td>
-                        </tr>,
-                      );
-                    }
-                    return lignes;
+                      </tr>
+                    );
                   })}
                 </tbody>
               </table>

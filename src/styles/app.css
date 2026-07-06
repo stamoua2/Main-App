@@ -426,12 +426,16 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
   background: var(--green-pale-3, #f2f5ef);
 }
 .stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
-.stepper .qty { min-width: 66px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+/* Quantité en stock modifiable directement (saisir le nombre exact + Entrée) */
+.stepper .qty-input {
+  width: 56px;
+  padding: 6px 4px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  border-radius: 8px;
+}
 .stepper .qty-unit { color: var(--muted-2, #5b6157); font-weight: 500; font-size: 12.5px; }
-
-/* Ligne d'édition intégrée à un tableau (ajustement de stock détaillé). */
-.inline-edit-row > td { background: var(--green-pale-3, #f2f5ef); padding: 14px 10px; }
-.inline-edit-row .toolbar { align-items: flex-end; margin: 0; }
 
 /* Conteneur défilant : les grands tableaux défilent sans casser la page */
 .table-scroll { overflow-x: auto; }
