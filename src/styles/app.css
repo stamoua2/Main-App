@@ -39,6 +39,8 @@ h1, h2, h3 {
   position: sticky;
   top: 0;
   height: 100vh;
+  /* Filet de sécurité : rien n'est jamais inaccessible même sur écran court. */
+  overflow-y: auto;
 }
 
 .sidebar .brand {
@@ -57,7 +59,11 @@ h1, h2, h3 {
   margin-bottom: 26px;
 }
 
-.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+/* La liste du menu occupe l'espace disponible et défile à l'intérieur si
+   l'écran est court : le titre reste en haut, le bloc session (déconnexion)
+   reste toujours visible en bas. min-height:0 permet au flex-item de rétrécir
+   au lieu de déborder. */
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; min-height: 0; }
 
 .nav-toggle {
   display: none;
@@ -97,6 +103,7 @@ h1, h2, h3 {
   padding-top: 14px;
   font-size: 13px;
   color: #d7e6d9;
+  flex-shrink: 0;
 }
 
 .sidebar .session button {
