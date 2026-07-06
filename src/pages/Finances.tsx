@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
 import { formatCad, parseCadToCents } from "../../shared/money";
+import { classeStatut } from "../statut";
 
 interface Rapport {
   du: string;
@@ -198,19 +199,31 @@ export default function Finances() {
               + Ajouter la dépense
             </button>
           </form>
-          <table className="data">
-            <tbody>
-              {depenses.slice(0, 12).map((d) => (
-                <tr key={d.id}>
-                  <td>{d.spentOn}</td>
-                  <td>
-                    {d.label} <span className="chip muted">{d.category}</span>
-                  </td>
-                  <td className="num">{formatCad(d.amountCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {depenses.length === 0 ? (
+            <div className="empty-state">
+              <span className="empty-ico">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </span>
+              <p>Aucune dépense enregistrée pour l'instant.</p>
+            </div>
+          ) : (
+            <table className="data">
+              <tbody>
+                {depenses.slice(0, 12).map((d) => (
+                  <tr key={d.id}>
+                    <td>{d.spentOn}</td>
+                    <td>
+                      {d.label} <span className="chip muted plain">{d.category}</span>
+                    </td>
+                    <td className="num">{formatCad(d.amountCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="panel">
@@ -244,19 +257,31 @@ export default function Finances() {
               + Ajouter le revenu
             </button>
           </form>
-          <table className="data">
-            <tbody>
-              {revenus.slice(0, 12).map((r) => (
-                <tr key={r.id}>
-                  <td>{r.receivedOn}</td>
-                  <td>
-                    {r.label} {r.source === "square" && <span className="chip">Square</span>}
-                  </td>
-                  <td className="num">{formatCad(r.amountCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {revenus.length === 0 ? (
+            <div className="empty-state">
+              <span className="empty-ico">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </span>
+              <p>Aucun revenu pour l'instant. Les factures payées et les paiements Square apparaîtront ici.</p>
+            </div>
+          ) : (
+            <table className="data">
+              <tbody>
+                {revenus.slice(0, 12).map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.receivedOn}</td>
+                    <td>
+                      {r.label} {r.source === "square" && <span className={classeStatut(r.source)}>Square</span>}
+                    </td>
+                    <td className="num">{formatCad(r.amountCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </>

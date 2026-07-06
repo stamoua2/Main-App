@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type DocumentFacturation } from "../api";
 import { formatCad } from "../../shared/money";
+import { classeStatut } from "../statut";
 
 interface Dashboard {
   clientsActifs: number;
@@ -164,7 +165,7 @@ export default function TableauDeBord() {
                     </td>
                     <td>{d.clientName}</td>
                     <td>
-                      <span className="chip">{d.status}</span>
+                      <span className={classeStatut(d.status)}>{d.status}</span>
                     </td>
                     <td className="num">{formatCad(d.totalCents)}</td>
                   </tr>

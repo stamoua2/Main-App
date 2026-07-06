@@ -268,9 +268,6 @@ export async function generateDocumentPdf(data: PdfDocumentData): Promise<Uint8A
       : `TVQ (${formatPct(data.tvqRate)})`;
     totalRow(tpsLabel, data.tpsCents);
     totalRow(tvqLabel, data.tvqCents);
-  } else {
-    drawRight(ctx, "Taxes non applicables selon la configuration de l'entreprise.", colAmount, ctx.y, 8.5, font, MUTED);
-    ctx.y -= 15;
   }
   ctx.page.drawLine({
     start: { x: labelX - 40, y: ctx.y + 10 },

@@ -15,6 +15,7 @@ import { computeTotals, lineAmountCents } from "../shared/taxes.js";
 import { generateDocumentPdf, type PdfDocumentData } from "./pdf.js";
 import {
   SquareError,
+  cancelSquareInvoice,
   handleSquareWebhook,
   pushDocumentToSquare,
   syncDocumentFromSquare,
@@ -114,6 +115,15 @@ const documentSchema = z.object({
   depositCents: z.number().int().min(0).optional(),
   notes: z.string().default(""),
   status: z.string().optional(),
+  lines: z.array(documentLineSchema).min(1, "Au moins une ligne est requise"),
+});
+
+// Modification d'un document existant (le type et le client ne changent pas).
+const documentUpdateSchema = z.object({
+  taxesEnabled: z.boolean().optional(),
+  depositCents: z.number().int().min(0).optional(),
+  notes: z.string().default(""),
+  issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   lines: z.array(documentLineSchema).min(1, "Au moins une ligne est requise"),
 });
 
@@ -957,11 +967,112 @@ route("POST", "/api/documents", async (req) => {
   return insertDocument(parsed.data);
 });
 
-route("DELETE", "/api/documents/:id", async (_req, params) => {
+// Traduit une SquareError en réponse HTTP (statut borné). Un 404 côté Square
+// (facture déjà disparue) n'est pas bloquant : on l'ignore silencieusement.
+function squareErrorToResponse(err: unknown, prefix: string): Response | null {
+  if (!(err instanceof SquareError)) throw err;
+  if (err.status === 404) return null;
+  const status = err.status >= 400 && err.status < 600 ? err.status : 502;
+  return error(`${prefix} : ${err.message}`, status);
+}
+
+// Modification d'une estimation/facture non payée. Recalcule les totaux et, si
+// le document existe dans Square, l'y met à jour (l'ancienne facture Square est
+// retirée puis recréée avec le contenu modifié).
+route("PUT", "/api/documents/:id", async (req, params) => {
+  const id = Number(params.id);
+  const parsed = documentUpdateSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
   const db = await getDb();
-  const { rows } = await db.query("DELETE FROM documents WHERE id = $1 RETURNING id", [Number(params.id)]);
+  const loaded = await loadDocument(id);
+  if (!loaded) return error("Document introuvable.", 404);
+  if (["payée", "payé"].includes(loaded.row.status)) {
+    return error("Un document payé ne peut plus être modifié.", 400);
+  }
+  const data = parsed.data;
+  const settings = await getSettings();
+  const taxesEnabled = data.taxesEnabled ?? loaded.row.taxes_enabled;
+  const tpsRate = Number(loaded.row.tps_rate);
+  const tvqRate = Number(loaded.row.tvq_rate);
+  const base = computeTotals(data.lines, { taxesEnabled, tpsRate, tvqRate });
+  const autoDeposit = Math.round((base.totalCents * settings.depositPct) / 100 / 100) * 100;
+  const totals = computeTotals(data.lines, {
+    taxesEnabled,
+    tpsRate,
+    tvqRate,
+    depositCents: data.depositCents ?? autoDeposit,
+  });
+  await db.query(
+    `UPDATE documents SET taxes_enabled = $1, subtotal_cents = $2, tps_cents = $3,
+       tvq_cents = $4, total_cents = $5, deposit_cents = $6, balance_cents = $7,
+       notes = $8, issued_on = COALESCE($9, issued_on), updated_at = now() WHERE id = $10`,
+    [
+      taxesEnabled, totals.subtotalCents, totals.tpsCents, totals.tvqCents,
+      totals.totalCents, totals.depositCents, totals.balanceCents,
+      data.notes, data.issuedOn ?? null, id,
+    ],
+  );
+  await db.query("DELETE FROM document_lines WHERE document_id = $1", [id]);
+  for (let i = 0; i < data.lines.length; i++) {
+    const line = data.lines[i];
+    await db.query(
+      `INSERT INTO document_lines (document_id, position, description, quantity, unit_price_cents, amount_cents)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, i, line.description, line.quantity, line.unitPriceCents, lineAmountCents(line)],
+    );
+  }
+  // Répercute la modification dans Square : on retire l'ancienne facture puis on
+  // la recrée (brouillon pour une estimation, publiée sinon).
+  let squareResynced = false;
+  if (loaded.row.square_invoice_id) {
+    try {
+      await cancelSquareInvoice(id, { clearLink: true });
+      await pushDocumentToSquare(id);
+      squareResynced = true;
+    } catch (err) {
+      const res = squareErrorToResponse(err, "Mise à jour Square impossible");
+      if (res) return res;
+    }
+  }
+  const res = await documentResponse(id);
+  const payload = await res.json();
+  return json({ ...payload, squareResynced });
+});
+
+route("DELETE", "/api/documents/:id", async (_req, params) => {
+  const id = Number(params.id);
+  const db = await getDb();
+  // Si le document existe dans Square, l'y retirer d'abord (évite des factures
+  // orphelines côté Square).
+  try {
+    await cancelSquareInvoice(id, { clearLink: false });
+  } catch (err) {
+    const res = squareErrorToResponse(err, "Retrait Square impossible");
+    if (res) return res;
+  }
+  const { rows } = await db.query("DELETE FROM documents WHERE id = $1 RETURNING id", [id]);
   if (!rows.length) return error("Document introuvable.", 404);
-  return json({ ok: true, supprime: Number(params.id) });
+  return json({ ok: true, supprime: id });
+});
+
+// Refuser une estimation : la facture Square correspondante n'étant plus valide,
+// on la retire de Square, puis on marque l'estimation « refusée ».
+route("POST", "/api/documents/:id/refuse", async (_req, params) => {
+  const id = Number(params.id);
+  const loaded = await loadDocument(id);
+  if (!loaded) return error("Document introuvable.", 404);
+  if (loaded.row.kind !== "estimation") {
+    return error("Seule une estimation peut être refusée.", 400);
+  }
+  try {
+    await cancelSquareInvoice(id, { clearLink: true });
+  } catch (err) {
+    const res = squareErrorToResponse(err, "Retrait Square impossible");
+    if (res) return res;
+  }
+  const db = await getDb();
+  await db.query("UPDATE documents SET status = 'refusée', updated_at = now() WHERE id = $1", [id]);
+  return documentResponse(id);
 });
 
 // Duplication d'un document vers un autre type (copie des lignes/totaux).

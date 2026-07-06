@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type DocumentFacturation } from "../api";
 import { formatCad } from "../../shared/money";
+import { classeStatut } from "../statut";
 
 export default function Documents() {
   const [documents, setDocuments] = useState<DocumentFacturation[]>([]);
@@ -65,15 +66,23 @@ export default function Documents() {
                 <td>{d.clientName}</td>
                 <td>{d.issuedOn}</td>
                 <td>
-                  <span className="chip">{d.status}</span>
+                  <span className={classeStatut(d.status)}>{d.status}</span>
                 </td>
                 <td className="num">{formatCad(d.totalCents)}</td>
               </tr>
             ))}
             {documents.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ color: "var(--muted)" }}>
-                  Aucun document.
+                <td colSpan={6}>
+                  <div className="empty-state">
+                    <span className="empty-ico">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                      </svg>
+                    </span>
+                    <p>Aucun document pour l'instant. Créez votre première estimation !</p>
+                  </div>
                 </td>
               </tr>
             )}

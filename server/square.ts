@@ -245,6 +245,57 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
   };
 }
 
+// ---------- Retrait d'une facture de Square ----------
+
+/**
+ * Retire de Square la facture liée à un document : une facture en BROUILLON est
+ * supprimée (`DELETE`), une facture publiée est annulée (`POST .../cancel`).
+ * Square exige la version courante → on la relit d'abord. No-op si le document
+ * n'a pas de facture Square. Avec `clearLink`, délie aussi le document local
+ * (efface les champs `square_*`) pour qu'il puisse être renvoyé au besoin.
+ */
+export async function cancelSquareInvoice(
+  documentId: number,
+  opts: { clearLink?: boolean } = {},
+): Promise<{ action: "none" | "deleted" | "canceled"; squareInvoiceId: string | null }> {
+  const db = await getDb();
+  const { rows } = await db.query<{ square_invoice_id: string | null }>(
+    "SELECT square_invoice_id FROM documents WHERE id = $1",
+    [documentId],
+  );
+  if (!rows[0]) throw new SquareError("Document introuvable.", 404, null);
+  const invoiceId = rows[0].square_invoice_id;
+  if (!invoiceId) return { action: "none", squareInvoiceId: null };
+
+  // Version courante requise par Square pour supprimer/annuler.
+  const current = await squareFetch<{ invoice: SquareInvoice }>(
+    `/v2/invoices/${encodeURIComponent(invoiceId)}`,
+    "GET",
+  );
+  let action: "deleted" | "canceled";
+  if (current.invoice.status === "DRAFT") {
+    await squareFetch(
+      `/v2/invoices/${encodeURIComponent(invoiceId)}?version=${current.invoice.version}`,
+      "DELETE",
+    );
+    action = "deleted";
+  } else {
+    await squareFetch(`/v2/invoices/${encodeURIComponent(invoiceId)}/cancel`, "POST", {
+      version: current.invoice.version,
+    });
+    action = "canceled";
+  }
+
+  if (opts.clearLink) {
+    await db.query(
+      `UPDATE documents SET square_invoice_id = NULL, square_payment_status = NULL,
+         square_public_url = NULL, updated_at = now() WHERE id = $1`,
+      [documentId],
+    );
+  }
+  return { action, squareInvoiceId: invoiceId };
+}
+
 // ---------- Synchronisation entrante ----------
 
 const PAID_STATUSES = new Set(["PAID", "REFUNDED", "PARTIALLY_REFUNDED"]);

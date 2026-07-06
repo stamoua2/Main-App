@@ -204,7 +204,7 @@ export default function Parametres() {
                 </td>
                 <td>{u.email || "—"}</td>
                 <td>
-                  <span className="chip">{u.role}</span>
+                  <span className="chip plain">{u.role}</span>
                 </td>
                 <td>
                   <button

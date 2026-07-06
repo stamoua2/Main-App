@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type DocumentFacturation, type Visite } from "../api";
 import { formatCad, formatPct } from "../../shared/money";
+import { classeStatut } from "../statut";
 
 const KIND_LABELS = { estimation: "Estimation", contrat: "Contrat", facture: "Facture" } as const;
 
@@ -87,11 +88,42 @@ export default function DetailDocument() {
     }
   }
 
+  async function refuser() {
+    if (!doc) return;
+    if (
+      !window.confirm(
+        `Marquer ${doc.number} comme refusée ?${doc.squareInvoiceId ? " La facture liée sera retirée de Square." : ""}`,
+      )
+    )
+      return;
+    setErreur("");
+    setSquareEnCours(true);
+    try {
+      const r = await api.post<{ document: DocumentFacturation }>(`/api/documents/${doc.id}/refuse`);
+      setDoc(r.document);
+      setMessage("Estimation refusée." + (doc.squareInvoiceId ? " Facture retirée de Square." : ""));
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Impossible de refuser l'estimation.");
+    } finally {
+      setSquareEnCours(false);
+    }
+  }
+
   async function supprimer() {
     if (!doc) return;
-    if (!window.confirm(`Supprimer ${doc.number} ?`)) return;
-    await api.delete(`/api/documents/${doc.id}`);
-    navigate("/documents");
+    if (
+      !window.confirm(
+        `Supprimer ${doc.number} ?${doc.squareInvoiceId ? " La facture liée sera aussi retirée de Square." : ""}`,
+      )
+    )
+      return;
+    setErreur("");
+    try {
+      await api.delete(`/api/documents/${doc.id}`);
+      navigate("/documents");
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Suppression impossible.");
+    }
   }
 
   if (erreur && !doc) return <p className="error-text">{erreur}</p>;
@@ -99,6 +131,9 @@ export default function DetailDocument() {
 
   const estEstimation = doc.kind === "estimation";
   const estContrat = doc.kind === "contrat";
+  // Un document payé est verrouillé; sinon on peut le modifier (les totaux et,
+  // le cas échéant, la facture Square liée sont recalculés/re-synchronisés).
+  const peutModifier = !["payée", "payé"].includes(doc.status) && doc.status !== "refusée";
 
   return (
     <>
@@ -119,6 +154,16 @@ export default function DetailDocument() {
           {estEstimation && (
             <button className="btn secondary" onClick={convertir}>
               Convertir en facture
+            </button>
+          )}
+          {peutModifier && (
+            <Link className="btn secondary" to={`/documents/${doc.id}/modifier`}>
+              Modifier
+            </Link>
+          )}
+          {estEstimation && doc.status !== "refusée" && (
+            <button className="btn danger" onClick={refuser} disabled={squareEnCours}>
+              {squareEnCours ? "…" : "Refuser"}
             </button>
           )}
           {estContrat && (
@@ -165,7 +210,7 @@ export default function DetailDocument() {
           <strong>Date :</strong> {doc.issuedOn}
         </span>
         <span>
-          <strong>Statut :</strong> <span className="chip">{doc.status}</span>
+          <strong>Statut :</strong> <span className={classeStatut(doc.status)}>{doc.status}</span>
         </span>
         <span>
           <strong>Taxes :</strong> {doc.taxesEnabled ? "TPS/TVQ appliquées" : "non applicables"}
@@ -283,7 +328,7 @@ export default function DetailDocument() {
                       <td>{v.scheduledAt.slice(0, 10)}</td>
                       <td>{v.services}</td>
                       <td>
-                        <span className="chip">{v.status}</span>
+                        <span className={classeStatut(v.status)}>{v.status}</span>
                       </td>
                     </tr>
                   ))}

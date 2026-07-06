@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
+import { classeStatut } from "../statut";
 import { formatCad, parseCadToCents } from "../../shared/money";
 
 interface LigneCommande {
@@ -355,7 +356,7 @@ export default function Commandes() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
             <h2 style={{ marginBottom: 0 }}>
               #{c.id} — {c.supplier}{" "}
-              <span className={`chip${c.status === "reçue" ? "" : " warn"}`}>{c.status}</span>
+              <span className={classeStatut(c.status)}>{c.status}</span>
             </h2>
             <div className="row-actions">
               <strong style={{ marginRight: 6 }}>{formatCad(c.totalCents)}</strong>
@@ -432,8 +433,17 @@ export default function Commandes() {
         </div>
       ))}
       {commandes.length === 0 && (
-        <div className="panel" style={{ color: "var(--muted)" }}>
-          Aucune commande fournisseur.
+        <div className="panel">
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 3h15v13H1zM16 8h4l3 3v5h-7z" />
+                <circle cx="5.5" cy="18.5" r="2.5" />
+                <circle cx="18.5" cy="18.5" r="2.5" />
+              </svg>
+            </span>
+            <p>Aucune commande fournisseur.</p>
+          </div>
         </div>
       )}
     </>
