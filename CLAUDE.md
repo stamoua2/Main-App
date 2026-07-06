@@ -232,6 +232,13 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
 - **Serveur dev local** : auto-seed au 1er démarrage; mot de passe d'Alex par
   défaut = `StAmourVert2026!` (`SEED_ALEX_PASSWORD`). Le serveur relit `dist/` à
   chaque requête → un `npm run build` suffit, inutile de le redémarrer.
+- **Alignement `.form-grid`** : un label qui passe sur 2 lignes décale son champ
+  sous ceux des colonnes voisines (les inputs ne s'alignent plus). Garder les
+  labels sur **une seule ligne** et mettre les précisions en `.field-hint` SOUS
+  le champ (l'indice ajoute de la hauteur vers le bas sans bouger l'input).
+- **Vérifier avant de déclarer « parfait »** : toujours produire une capture
+  d'écran et l'inspecter avant d'affirmer qu'un rendu/formatage est parfait —
+  ne jamais l'affirmer sur la seule foi du code.
 
 ## Tests
 

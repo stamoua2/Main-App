@@ -510,16 +510,21 @@ export default function Inventaire() {
                           <div className="row-actions">
                             <button
                               className="btn secondary small"
+                              title="Entrée/sortie de stock (quantité + raison)"
                               onClick={() =>
                                 setAjuste(
                                   ajuste?.id === p.id ? null : { id: p.id, delta: "", reason: "" },
                                 )
                               }
                             >
-                              Ajuster…
+                              Ajuster le stock
                             </button>
-                            <button className="btn secondary small" onClick={() => ouvrirEdition(p)}>
-                              Modifier
+                            <button
+                              className="btn secondary small"
+                              title="Modifier la fiche du produit (nom, unité, format, coût…)"
+                              onClick={() => ouvrirEdition(p)}
+                            >
+                              Modifier la fiche
                             </button>
                             <button className="btn danger small" onClick={() => supprimer(p)}>
                               Retirer
