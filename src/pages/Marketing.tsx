@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
+import { classeStatut } from "../statut";
 
 interface Campagne {
   id: number;
@@ -251,7 +252,15 @@ export default function Marketing() {
       <div className="panel">
         <h2>Campagnes</h2>
         {campagnes.length === 0 ? (
-          <p style={{ color: "var(--muted)" }}>Aucune campagne. Créez la première ci-dessus !</p>
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m3 11 18-5v12L3 14v-3z" />
+                <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+              </svg>
+            </span>
+            <p>Aucune campagne. Créez la première ci-dessus !</p>
+          </div>
         ) : (
           campagnes.map((c) => (
             <div
@@ -274,7 +283,8 @@ export default function Marketing() {
               <div style={{ flex: "1 1 260px", minWidth: 0 }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <strong>{c.name}</strong>
-                  <span className="chip">{c.channel || "—"}</span>
+                  <span className={classeStatut(c.status)}>{c.status}</span>
+                  <span className="chip plain">{c.channel || "—"}</span>
                   <span style={{ color: "var(--muted)", fontSize: 13 }}>
                     {c.launchOn ? `lancement le ${c.launchOn}` : ""}
                   </span>

@@ -30,6 +30,14 @@ describe("authentification", () => {
     expect(clients.status).toBe(200);
   });
 
+  it("limite la session à 24 h (le cookie expire après 86400 s)", async () => {
+    const res = await api("POST", "/api/auth/login", {
+      body: { identifiant: "alex", password: ALEX.password },
+    });
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("Max-Age=86400");
+  });
+
   it("accepte aussi le courriel comme identifiant (rétrocompatibilité)", async () => {
     const cookie = await login(ALEX.email, ALEX.password);
     const me = await api("GET", "/api/auth/me", { cookie });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { api, type Utilisateur } from "./api";
+import { Icone } from "./icons";
 import Connexion from "./pages/Connexion";
 import TableauDeBord from "./pages/TableauDeBord";
 import Clients from "./pages/Clients";
@@ -19,18 +20,18 @@ import Finances from "./pages/Finances";
 import Marketing from "./pages/Marketing";
 
 const NAV = [
-  { to: "/", label: "Tableau de bord", num: "01" },
-  { to: "/clients", label: "Clients", num: "02" },
-  { to: "/forfaits", label: "Forfaits", num: "03" },
-  { to: "/superficie", label: "Superficie", num: "04" },
-  { to: "/calendrier", label: "Calendrier & routes", num: "05" },
-  { to: "/soumissions", label: "Soumissions web", num: "06" },
-  { to: "/documents", label: "Estimations & factures", num: "07" },
-  { to: "/inventaire", label: "Inventaire", num: "08" },
-  { to: "/commandes", label: "Commandes", num: "09" },
-  { to: "/finances", label: "Finances", num: "10" },
-  { to: "/marketing", label: "Marketing", num: "11" },
-  { to: "/parametres", label: "Paramètres", num: "12" },
+  { to: "/", label: "Tableau de bord", icon: "tableau" },
+  { to: "/clients", label: "Clients", icon: "clients" },
+  { to: "/forfaits", label: "Forfaits", icon: "forfaits" },
+  { to: "/superficie", label: "Superficie", icon: "superficie" },
+  { to: "/calendrier", label: "Calendrier & routes", icon: "calendrier" },
+  { to: "/soumissions", label: "Soumissions web", icon: "soumissions" },
+  { to: "/documents", label: "Estimations & factures", icon: "documents" },
+  { to: "/inventaire", label: "Inventaire", icon: "inventaire" },
+  { to: "/commandes", label: "Commandes", icon: "commandes" },
+  { to: "/finances", label: "Finances", icon: "finances" },
+  { to: "/marketing", label: "Marketing", icon: "marketing" },
+  { to: "/parametres", label: "Paramètres", icon: "parametres" },
 ];
 
 export default function App() {
@@ -69,9 +70,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className={`sidebar${menuOuvert ? " menu-open" : ""}`}>
-        <div>
-          <div className="brand">St-Amour du Vert</div>
-          <div className="brand-sub">Gestionnaire</div>
+        <div className="brand-block">
+          <span className="brand-mark" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+              <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+            </svg>
+          </span>
+          <div>
+            <div className="brand">St-Amour du Vert</div>
+            <div className="brand-sub">Gestionnaire</div>
+          </div>
         </div>
         <button
           className="nav-toggle"
@@ -96,7 +105,7 @@ export default function App() {
         <nav>
           {NAV.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to === "/"} onClick={() => setMenuOuvert(false)}>
-              <span className="num">{item.num}</span>
+              <span className="nav-ico"><Icone nom={item.icon} /></span>
               {item.label}
             </NavLink>
           ))}
@@ -118,6 +127,7 @@ export default function App() {
           <Route path="/soumissions" element={<Soumissions />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/nouveau" element={<NouveauDocument />} />
+          <Route path="/documents/:id/modifier" element={<NouveauDocument />} />
           <Route path="/documents/:id" element={<DetailDocument />} />
           <Route path="/inventaire" element={<Inventaire />} />
           <Route path="/commandes" element={<Commandes />} />

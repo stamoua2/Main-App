@@ -4,6 +4,7 @@ import { api, ApiError, type Client, type DocumentFacturation, type Forfait } fr
 import { m2ToFt2 } from "../../shared/area";
 import { formatCad } from "../../shared/money";
 import { FormClient } from "./Clients";
+import { classeStatut } from "../statut";
 
 export default function FicheClient() {
   const { id } = useParams();
@@ -115,7 +116,7 @@ export default function FicheClient() {
             <p>
               <strong>Forfait :</strong> {client.packageName ?? "Aucun"}
               <br />
-              <strong>Statut :</strong> <span className="chip">{client.status}</span>
+              <strong>Statut :</strong> <span className={classeStatut(client.status)}>{client.status}</span>
             </p>
             <p>
               <strong>Superficie du terrain :</strong>{" "}
@@ -133,7 +134,27 @@ export default function FicheClient() {
       <div className="panel">
         <h2>Estimations & factures</h2>
         {documents.length === 0 ? (
-          <p style={{ color: "var(--muted)" }}>Aucun document pour ce client.</p>
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
+            </span>
+            <p>Aucun document pour ce client.</p>
+          </div>
         ) : (
           <table className="data">
             <thead>
@@ -152,7 +173,7 @@ export default function FicheClient() {
                   </td>
                   <td>{d.kind}</td>
                   <td>
-                    <span className="chip">{d.status}</span>
+                    <span className={classeStatut(d.status)}>{d.status}</span>
                   </td>
                   <td className="num">{formatCad(d.totalCents)}</td>
                 </tr>

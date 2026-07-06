@@ -182,7 +182,15 @@ export default function Calendrier() {
       <div className="panel">
         <h2>Visites du {date}</h2>
         {visites.length === 0 ? (
-          <p style={{ color: "var(--muted)" }}>Aucune visite planifiée ce jour-là.</p>
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+            </span>
+            <p>Aucune visite planifiée ce jour-là.</p>
+          </div>
         ) : (
           <table className="data">
             <thead>
@@ -213,7 +221,7 @@ export default function Calendrier() {
                       "—"
                     )}
                   </td>
-                  <td>{v.routePosition ? <span className="chip">no {v.routePosition}</span> : "—"}</td>
+                  <td>{v.routePosition ? <span className="chip plain">no {v.routePosition}</span> : "—"}</td>
                   <td>
                     <select value={v.status} onChange={(e) => changerStatut(v, e.target.value)}>
                       {Object.entries(STATUTS).map(([value, label]) => (
@@ -242,7 +250,15 @@ export default function Calendrier() {
           date/heure directement dans la liste, l'ordre du jour suit.
         </p>
         {aVenir.length === 0 ? (
-          <p style={{ color: "var(--muted)" }}>Aucune visite à venir.</p>
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+            </span>
+            <p>Aucune visite à venir.</p>
+          </div>
         ) : (
           <div className="table-scroll">
             <table className="data">
@@ -306,7 +322,7 @@ export default function Calendrier() {
                 {plan.optimise.ordre.map((a) => (
                   <tr key={a.visiteId}>
                     <td>
-                      <span className="chip">no {a.arret}</span>
+                      <span className="chip plain">no {a.arret}</span>
                     </td>
                     <td>{a.client}</td>
                     <td>{a.adresse}</td>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   api,
   ApiError,
@@ -22,13 +22,17 @@ const LIGNE_VIDE: LigneEdition = { description: "", quantite: "1", prixUnitaire:
 export default function NouveauDocument() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { id: editId } = useParams();
+  const enEdition = Boolean(editId);
   const [clients, setClients] = useState<Client[]>([]);
   const [forfaits, setForfaits] = useState<Forfait[]>([]);
   const [parametres, setParametres] = useState<Parametres | null>(null);
   const [clientId, setClientId] = useState(searchParams.get("client") ?? "");
-  const [kind, setKind] = useState<"estimation" | "facture">(
+  const [kind, setKind] = useState<"estimation" | "contrat" | "facture">(
     searchParams.get("type") === "facture" ? "facture" : "estimation",
   );
+  const [numero, setNumero] = useState("");
+  const [aFactureSquare, setAFactureSquare] = useState(false);
   const [taxesActives, setTaxesActives] = useState<boolean | null>(null);
   const [acompte, setAcompte] = useState("");
   // L'acompte suit automatiquement le % des paramètres tant qu'il n'a pas
@@ -44,6 +48,32 @@ export default function NouveauDocument() {
     api.get<{ forfaits: Forfait[] }>("/api/packages").then((r) => setForfaits(r.forfaits));
     api.get<{ parametres: Parametres }>("/api/settings").then((r) => setParametres(r.parametres));
   }, []);
+
+  // Mode édition : préremplir le formulaire avec le document existant.
+  useEffect(() => {
+    if (!editId) return;
+    api
+      .get<{ document: DocumentFacturation }>(`/api/documents/${editId}`)
+      .then((r) => {
+        const d = r.document;
+        setKind(d.kind);
+        setClientId(String(d.clientId));
+        setNumero(d.number);
+        setAFactureSquare(Boolean(d.squareInvoiceId));
+        setTaxesActives(d.taxesEnabled);
+        setNotes(d.notes ?? "");
+        setAcompte(d.depositCents > 0 ? (d.depositCents / 100).toFixed(2).replace(".", ",") : "");
+        setAcompteManuel(true); // conserve l'acompte enregistré
+        setLignes(
+          (d.lines ?? []).map((l) => ({
+            description: l.description,
+            quantite: String(l.quantity).replace(".", ","),
+            prixUnitaire: (l.unitPriceCents / 100).toFixed(2).replace(".", ","),
+          })),
+        );
+      })
+      .catch(() => setErreur("Document introuvable."));
+  }, [editId]);
 
   const taxes = taxesActives ?? parametres?.taxesEnabled ?? false;
 
@@ -107,17 +137,27 @@ export default function NouveauDocument() {
     }
     setEnCours(true);
     try {
-      const r = await api.post<{ document: DocumentFacturation }>("/api/documents", {
-        kind,
-        clientId: Number(clientId),
-        taxesEnabled: taxes,
-        depositCents: parseCadToCents(acompte || "0"),
-        notes,
-        lines: lignesValides,
-      });
-      navigate(`/documents/${r.document.id}`);
+      if (enEdition) {
+        const r = await api.put<{ document: DocumentFacturation }>(`/api/documents/${editId}`, {
+          taxesEnabled: taxes,
+          depositCents: parseCadToCents(acompte || "0"),
+          notes,
+          lines: lignesValides,
+        });
+        navigate(`/documents/${r.document.id}`);
+      } else {
+        const r = await api.post<{ document: DocumentFacturation }>("/api/documents", {
+          kind,
+          clientId: Number(clientId),
+          taxesEnabled: taxes,
+          depositCents: parseCadToCents(acompte || "0"),
+          notes,
+          lines: lignesValides,
+        });
+        navigate(`/documents/${r.document.id}`);
+      }
     } catch (err) {
-      setErreur(err instanceof ApiError ? err.message : "Erreur lors de la création.");
+      setErreur(err instanceof ApiError ? err.message : "Erreur lors de l'enregistrement.");
     } finally {
       setEnCours(false);
     }
@@ -128,16 +168,34 @@ export default function NouveauDocument() {
       <div className="page-head">
         <div>
           <div className="eyebrow">Facturation</div>
-          <h1>{kind === "facture" ? "Nouvelle facture" : "Nouvelle estimation"}</h1>
+          <h1>
+            {enEdition
+              ? `Modifier ${numero || (kind === "facture" ? "la facture" : kind === "contrat" ? "le contrat" : "l'estimation")}`
+              : kind === "facture"
+                ? "Nouvelle facture"
+                : "Nouvelle estimation"}
+          </h1>
         </div>
       </div>
+
+      {enEdition && aFactureSquare && (
+        <p className="ok-text" style={{ marginTop: -8 }}>
+          Ce document existe dans Square : à l'enregistrement, sa facture Square sera
+          mise à jour automatiquement avec les modifications.
+        </p>
+      )}
 
       <form onSubmit={soumettre}>
         <div className="panel">
           <div className="form-grid">
             <label className="field">
               Client
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)} required>
+              <select
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                required
+                disabled={enEdition}
+              >
                 <option value="">— Choisir un client —</option>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -148,10 +206,17 @@ export default function NouveauDocument() {
             </label>
             <label className="field">
               Type de document
-              <select value={kind} onChange={(e) => setKind(e.target.value as "estimation" | "facture")}>
-                <option value="estimation">Estimation</option>
-                <option value="facture">Facture (ex. : service supplémentaire)</option>
-              </select>
+              {enEdition ? (
+                <input
+                  value={kind === "facture" ? "Facture" : kind === "contrat" ? "Contrat" : "Estimation"}
+                  disabled
+                />
+              ) : (
+                <select value={kind} onChange={(e) => setKind(e.target.value as "estimation" | "facture")}>
+                  <option value="estimation">Estimation</option>
+                  <option value="facture">Facture (ex. : service supplémentaire)</option>
+                </select>
+              )}
             </label>
             <label className="field">
               Acompte demandé ($) — auto : {pctAcompte.toLocaleString("fr-CA")} % du total
@@ -288,8 +353,23 @@ export default function NouveauDocument() {
           {erreur && <div className="error-text">{erreur}</div>}
           <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
             <button className="btn" type="submit" disabled={enCours}>
-              {enCours ? "Création…" : kind === "facture" ? "Créer la facture" : "Créer l'estimation"}
+              {enCours
+                ? "Enregistrement…"
+                : enEdition
+                  ? "Enregistrer les modifications"
+                  : kind === "facture"
+                    ? "Créer la facture"
+                    : "Créer l'estimation"}
             </button>
+            {enEdition && (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => navigate(`/documents/${editId}`)}
+              >
+                Annuler
+              </button>
+            )}
           </div>
         </div>
       </form>

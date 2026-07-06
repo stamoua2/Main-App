@@ -23,7 +23,7 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
     mapsPromise = new Promise((resolve, reject) => {
       window.__savMapsReady = () => resolve(window.google.maps);
       const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&callback=__savMapsReady&loading=async&language=fr&region=CA`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&callback=__savMapsReady&loading=async&language=fr&region=CA&libraries=places`;
       script.async = true;
       script.onerror = () => reject(new Error("Impossible de charger Google Maps."));
       document.head.appendChild(script);
@@ -45,6 +45,10 @@ export default function Superficie() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapObj = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
+  const markerRef = useRef<any>(null); // épingle sur l'adresse recherchée
+  const autoServiceRef = useRef<any>(null); // Google Places AutocompleteService
+  const sessionTokenRef = useRef<any>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sections, setSections] = useState<Section[]>([[]]);
   const [erreur, setErreur] = useState("");
   const [clients, setClients] = useState<Client[]>([]);
@@ -52,6 +56,9 @@ export default function Superficie() {
   const [sauvegarde, setSauvegarde] = useState("");
   const [adresse, setAdresse] = useState("");
   const [messageCarte, setMessageCarte] = useState("");
+  const [suggestions, setSuggestions] = useState<
+    { placeId: string; principal: string; secondaire: string }[]
+  >([]);
 
   const aires = sections.map((s) => (s.length >= 3 ? polygonAreaM2(s) : 0));
   const totalM2 = aires.reduce((a, b) => a + b, 0);
@@ -79,6 +86,9 @@ export default function Superficie() {
           fullscreenControl: true,
         });
         mapObj.current = map;
+        if (maps.places?.AutocompleteService) {
+          autoServiceRef.current = new maps.places.AutocompleteService();
+        }
         map.addListener("click", (e: any) => {
           const point = { lat: e.latLng.lat(), lng: e.latLng.lng() };
           setSommetsActifs((prev) => [...prev, point]);
@@ -100,6 +110,74 @@ export default function Superficie() {
     });
   }
 
+  // Épingle (pointeur) qui indique l'adresse repérée sur la carte.
+  function placerEpingle(location: any, titre: string) {
+    const maps = window.google?.maps;
+    if (!maps || !mapObj.current) return;
+    if (!markerRef.current) {
+      markerRef.current = new maps.Marker({ map: mapObj.current });
+    }
+    markerRef.current.setMap(mapObj.current);
+    markerRef.current.setPosition(location);
+    markerRef.current.setTitle(titre);
+    markerRef.current.setAnimation(maps.Animation.DROP);
+  }
+
+  // Auto-complétion : interroge Google Places à chaque frappe (débounce léger)
+  // et affiche une liste de vraies adresses sous le champ.
+  function surSaisieAdresse(valeur: string) {
+    setAdresse(valeur);
+    const service = autoServiceRef.current;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!service || valeur.trim().length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      const maps = window.google?.maps;
+      if (!sessionTokenRef.current && maps?.places?.AutocompleteSessionToken) {
+        sessionTokenRef.current = new maps.places.AutocompleteSessionToken();
+      }
+      service.getPlacePredictions(
+        {
+          input: valeur,
+          componentRestrictions: { country: "ca" },
+          sessionToken: sessionTokenRef.current ?? undefined,
+        },
+        (predictions: any[] | null) => {
+          setSuggestions(
+            (predictions ?? []).slice(0, 6).map((p) => ({
+              placeId: p.place_id,
+              principal: p.structured_formatting?.main_text ?? p.description,
+              secondaire: p.structured_formatting?.secondary_text ?? "",
+            })),
+          );
+        },
+      );
+    }, 220);
+  }
+
+  async function choisirSuggestion(s: { placeId: string; principal: string; secondaire: string }) {
+    setAdresse(s.secondaire ? `${s.principal}, ${s.secondaire}` : s.principal);
+    setSuggestions([]);
+    const maps = window.google?.maps;
+    if (!maps || !mapObj.current) return;
+    try {
+      const geocoder = new maps.Geocoder();
+      const { results } = await geocoder.geocode({ placeId: s.placeId });
+      if (results?.[0]) {
+        const loc = results[0].geometry.location;
+        mapObj.current.setCenter(loc);
+        mapObj.current.setZoom(20);
+        placerEpingle(loc, results[0].formatted_address);
+        setMessageCarte(`Carte centrée sur : ${results[0].formatted_address}`);
+      }
+    } catch {
+      setMessageCarte("Adresse introuvable.");
+    }
+    sessionTokenRef.current = null; // clôt la session de facturation Places
+  }
+
   // Recherche d'adresse : centre la carte prête à tracer (zoom 19).
   async function chercherAdresse() {
     const maps = window.google?.maps;
@@ -115,8 +193,10 @@ export default function Superficie() {
         setMessageCarte("Adresse introuvable — précisez la ville (ex. : Gatineau).");
         return;
       }
+      setSuggestions([]);
       mapObj.current.setCenter(results[0].geometry.location);
-      mapObj.current.setZoom(19);
+      mapObj.current.setZoom(20);
+      placerEpingle(results[0].geometry.location, results[0].formatted_address);
       setMessageCarte(`Carte centrée sur : ${results[0].formatted_address}`);
     } catch {
       setMessageCarte("Adresse introuvable — précisez la ville (ex. : Gatineau).");
@@ -128,8 +208,10 @@ export default function Superficie() {
     const c = clients.find((x) => x.id === Number(id));
     if (c && mapObj.current) {
       if (c.latitude && c.longitude) {
-        mapObj.current.setCenter({ lat: c.latitude, lng: c.longitude });
-        mapObj.current.setZoom(19);
+        const loc = { lat: c.latitude, lng: c.longitude };
+        mapObj.current.setCenter(loc);
+        mapObj.current.setZoom(20);
+        placerEpingle(loc, c.fullName);
         setMessageCarte(`Carte centrée sur le terrain de ${c.fullName}.`);
       } else if (c.addressLine) {
         setAdresse(`${c.addressLine}, ${c.city}`);
@@ -207,16 +289,54 @@ export default function Superficie() {
 
       <div className="panel" style={{ marginBottom: 16 }}>
         <div className="toolbar">
-          <label className="field" style={{ flex: "1 1 260px" }}>
+          <label className="field autocomplete" style={{ flex: "1 1 260px" }}>
             Trouver une adresse
             <input
               value={adresse}
-              onChange={(e) => setAdresse(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && chercherAdresse()}
+              onChange={(e) => surSaisieAdresse(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  setSuggestions([]);
+                  chercherAdresse();
+                } else if (e.key === "Escape") {
+                  setSuggestions([]);
+                }
+              }}
               placeholder="ex. : 1177, route 315, L'Ange-Gardien"
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={suggestions.length > 0}
+              aria-autocomplete="list"
             />
+            {suggestions.length > 0 && (
+              <ul className="autocomplete-list" role="listbox">
+                {suggestions.map((s) => (
+                  <li
+                    key={s.placeId}
+                    role="option"
+                    aria-selected="false"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      choisirSuggestion(s);
+                    }}
+                  >
+                    <span className="pin" aria-hidden="true">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                        <circle cx="12" cy="10" r="3" />
+                      </svg>
+                    </span>
+                    <span>
+                      <span className="main-line">{s.principal}</span>
+                      {s.secondaire && <span className="sub-line">{s.secondaire}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </label>
-          <button className="btn secondary" onClick={chercherAdresse}>
+          <button className="btn secondary" onClick={() => { setSuggestions([]); chercherAdresse(); }}>
             Trouver
           </button>
           <label className="field" style={{ flex: "1 1 240px" }}>
@@ -263,7 +383,7 @@ export default function Superficie() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {sections.map((s, i) =>
               s.length >= 3 ? (
-                <span key={i} className="chip" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                <span key={i} className="chip plain" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                   Section {i + 1} : {Math.round(m2ToFt2(aires[i])).toLocaleString("fr-CA")} pi²
                   <button
                     type="button"

@@ -6,7 +6,10 @@ import { SignJWT, jwtVerify } from "jose";
 import { getDb } from "./db.js";
 
 const COOKIE_NAME = "sav_session";
-const SESSION_DAYS = 14;
+// Durée de session : le propriétaire souhaite reforcer la connexion chaque jour.
+// Le JWT expire après 24 h et le cookie a le même Max-Age → l'utilisateur doit
+// se reconnecter au moins une fois par 24 h.
+const SESSION_HOURS = 24;
 
 export interface SessionUser {
   id: number;
@@ -41,7 +44,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(`${SESSION_DAYS}d`)
+    .setExpirationTime(`${SESSION_HOURS}h`)
     .sign(secretKey());
   const secure = process.env.NETLIFY || process.env.NODE_ENV === "production";
   return [
@@ -49,7 +52,7 @@ export async function createSessionCookie(user: SessionUser): Promise<string> {
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
-    `Max-Age=${SESSION_DAYS * 24 * 3600}`,
+    `Max-Age=${SESSION_HOURS * 3600}`,
     ...(secure ? ["Secure"] : []),
   ].join("; ");
 }

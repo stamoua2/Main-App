@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type Client, type Forfait } from "../api";
 import { m2ToFt2 } from "../../shared/area";
+import { classeStatut } from "../statut";
 
 const CLIENT_VIDE = {
   firstName: "",
@@ -219,16 +220,33 @@ export default function Clients() {
                     : "—"}
                 </td>
                 <td>
-                  <span className={`chip${c.status === "prospect" ? " warn" : c.status === "inactif" ? " muted" : ""}`}>
-                    {c.status}
-                  </span>
+                  <span className={classeStatut(c.status)}>{c.status}</span>
                 </td>
               </tr>
             ))}
             {clients.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ color: "var(--muted)" }}>
-                  Aucun client trouvé.
+                <td colSpan={5}>
+                  <div className="empty-state">
+                    <span className="empty-ico">
+                      <svg
+                        width="22"
+                        height="22"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                    </span>
+                    <p>Aucun client trouvé.</p>
+                  </div>
                 </td>
               </tr>
             )}

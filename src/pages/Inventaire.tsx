@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type ProduitInventaire } from "../api";
 import { formatCad, parseCadToCents } from "../../shared/money";
+import { classeStatut } from "../statut";
 
 interface Categorie {
   id: number;
@@ -286,7 +287,7 @@ export default function Inventaire() {
           <h2>Catégories du menu déroulant</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
             {categories.map((c) => (
-              <span key={c.id} className="chip" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <span key={c.id} className="chip plain" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                 {c.name}
                 <button type="button" className="chip-x" aria-label={`Retirer ${c.name}`} onClick={() => retirerCategorie(c)}>
                   ×
@@ -406,13 +407,24 @@ export default function Inventaire() {
           </label>
         </div>
 
-        {nomsGroupes.length === 0 && <p style={{ color: "var(--muted)" }}>Aucun produit trouvé.</p>}
+        {nomsGroupes.length === 0 && (
+          <div className="empty-state">
+            <span className="empty-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            </span>
+            <p>Aucun produit trouvé. Ajustez la recherche ou ajoutez un produit.</p>
+          </div>
+        )}
 
         {nomsGroupes.map((nom) => (
           <section key={nom} style={{ marginTop: 18 }}>
             <h2 style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               {nom}
-              <span className="chip">{groupes.get(nom)!.length}</span>
+              <span className="chip plain">{groupes.get(nom)!.length}</span>
             </h2>
             <div className="table-scroll">
               <table className="data">
@@ -430,7 +442,7 @@ export default function Inventaire() {
                   {groupes.get(nom)!.map((p) => (
                     <tr key={p.id}>
                       <td>
-                        {p.name} {p.source === "manuel" && <span className="chip warn">manuel</span>}
+                        {p.name} {p.source === "manuel" && <span className={classeStatut(p.source)}>manuel</span>}
                       </td>
                       <td>{p.format || "—"}</td>
                       <td>{p.sku || "—"}</td>

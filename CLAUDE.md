@@ -37,7 +37,8 @@ Alexandre St-Amour (astamour8@gmail.com). Dépôt distinct du site vitrine
 > Le propriétaire a choisi de les documenter ici. Garder le dépôt privé et les
 > faire tourner au besoin. Mettre à jour cette section si un mot de passe change.
 
-- **alex** (admin) — mot de passe `test123` — vérifié fonctionnel en production.
+- **alex** (admin) — mot de passe `test123` en production; `StAmourVert2026!`
+  au seed local par défaut (`SEED_ALEX_PASSWORD`). Vérifié fonctionnel en prod.
   Connexion possible par nom d'utilisateur `alex` ou courriel
   `alex@stamourduvert.com`. (Mot de passe faible → à changer idéalement.)
 - **cindy** — mot de passe `CindyVert2026!` (valeur connue à la création;
@@ -176,7 +177,24 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
 - **Webhook Square LIVE en production** : `invoice.*` (statuts) + `payment.*`
   (revenus temps réel), signature HMAC vérifiée (testé : signature valide → 200,
   invalide/absente → 401).
-- **Tests** : suite à 107 tests, 100 % verte.
+- **Passe 5 (qualité visuelle + Square/Superficie/connexion)** :
+  - Refonte visuelle marquée (identité verte conservée) : barre latérale à
+    icônes au trait (`src/icons.tsx`) + dégradé + état actif; cartes stat à
+    ruban d'accent; puces de statut colorées et cohérentes partout via
+    `src/statut.ts` (`classeStatut`); états vides uniformisés (`.empty-state`);
+    connexion repensée; logo « feuille ».
+  - **Superficie** : épingle qui « tombe » sur l'adresse repérée +
+    **auto-complétion Google Places** (liste sous le champ, jeton de session
+    pour limiter la facturation — API « Places » à activer côté Google Cloud).
+  - **Documents** : PDF sans mention « Taxes non applicables… »; **édition**
+    d'un document (page `/documents/:id/modifier`, route `PUT`) avec recalcul
+    des totaux + **re-synchro Square**; **suppression** retire aussi la facture
+    Square; bouton **« Refuser »** (estimations) qui retire la facture Square et
+    passe le statut à « refusée ». Helper `cancelSquareInvoice` (delete brouillon
+    / cancel publiée).
+  - **Connexion** : session limitée à **24 h** (`SESSION_HOURS`, cookie
+    `Max-Age=86400`) → reconnexion quotidienne forcée.
+- **Tests** : suite à 115 tests, 100 % verte.
 
 ## Journal — pièges résolus (ne pas refaire les mêmes erreurs)
 
@@ -199,8 +217,19 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
   (9.975000000000001) → `ratePct()` avec `toFixed(4)` + trim.
 - Barre latérale trop haute sur portable : le bouton « Se déconnecter »
   disparaissait → menu resserré + `min-height:0` pour tenir sans défilement.
-- Playwright n'est pas installé dans le dépôt : utiliser `playwright-core` +
-  `executablePath: "/opt/pw-browsers/chromium"` (voir scripts de vérif).
+- **Barre latérale mobile** : `.sidebar nav { flex: 1 }` fixe `flex-basis: 0` et
+  **écrase `width: 100%`** → au menu ouvert, forcer `flex: 0 0 100%` sur
+  `.sidebar.menu-open nav`, sinon les entrées débordent à droite.
+- **Captures d'écran Playwright dans le bac à sable** : Playwright est installé
+  **globalement** (`/opt/node22/lib/node_modules/playwright`, module CommonJS →
+  `import pw from "…/playwright/index.js"; const { chromium } = pw`). Binaire
+  Chromium réel : `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` (le chemin
+  `…/chromium/chrome-linux/chrome` n'existe pas). Egress navigateur bloqué →
+  injecter un **shim `window.google.maps`** via `addInitScript` (Map/Marker/
+  Geocoder/`places.AutocompleteService`) pour illustrer carte + auto-complétion.
+- **Serveur dev local** : auto-seed au 1er démarrage; mot de passe d'Alex par
+  défaut = `StAmourVert2026!` (`SEED_ALEX_PASSWORD`). Le serveur relit `dist/` à
+  chaque requête → un `npm run build` suffit, inutile de le redémarrer.
 
 ## Tests
 
