@@ -229,4 +229,57 @@ describe("synchronisation Square — entrante (webhook)", () => {
     expect(res.status).toBe(200);
     expect(res.body.square.squareStatus).toBe("PAID");
   });
+
+  // Le webhook payment.* enregistre l'encaissement comme revenu en temps réel.
+  const paymentMadeEvent = {
+    type: "payment.created",
+    event_id: "e7d90c05-0000-4000-8000-0000000000pay",
+    created_at: new Date().toISOString(),
+    data: {
+      type: "payment",
+      id: "PAY_WEBHOOK_1",
+      object: {
+        payment: {
+          id: "PAY_WEBHOOK_1",
+          status: "COMPLETED",
+          amount_money: { amount: 20000, currency: "CAD" },
+          created_at: "2026-07-01T12:00:00Z",
+          note: "Acompte via webhook",
+        },
+      },
+    },
+  };
+
+  it("webhook payment.created signé → revenu Square enregistré", async () => {
+    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentMadeEvent)));
+    expect(res.status).toBe(200);
+    const result = await res.json();
+    expect(result.processed).toBe(true);
+
+    const revenus = await api("GET", "/api/revenues", { cookie });
+    const revenu = revenus.body.revenus.find((r: any) => r.source === "square" && r.amountCents === 20000);
+    expect(revenu).toBeDefined();
+  });
+
+  it("rejoue le même paiement sans double revenu (idempotence)", async () => {
+    const res = await handleApiRequest(signedRequest(JSON.stringify(paymentMadeEvent)));
+    const result = await res.json();
+    expect(result.processed).toBe(false);
+    const revenus = await api("GET", "/api/revenues", { cookie });
+    const count = revenus.body.revenus.filter((r: any) => r.amountCents === 20000 && r.source === "square").length;
+    expect(count).toBe(1);
+  });
+
+  it("ignore proprement un type d'événement non géré", async () => {
+    const other = {
+      type: "customer.created",
+      event_id: "e7d90c05-0000-4000-8000-0000000000cus",
+      data: { type: "customer", object: {} },
+    };
+    const res = await handleApiRequest(signedRequest(JSON.stringify(other)));
+    expect(res.status).toBe(200);
+    const result = await res.json();
+    expect(result.processed).toBe(false);
+    expect(result.detail).toContain("ignoré");
+  });
 });

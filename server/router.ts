@@ -22,7 +22,7 @@ import {
 } from "./square.js";
 import { MapsError, geocodeAddress, optimizeRoute, type GeoPoint } from "./routesapi.js";
 import { GeminiError, generateAdImage, generateAdText } from "./gemini.js";
-import { listSquarePayments } from "./square.js";
+import { applySquarePayment, listSquarePayments } from "./square.js";
 import { coutForfait, prixDepuisMarge, type ProduitApplique } from "../shared/pricing.js";
 import { M2_TO_FT2 } from "../shared/area.js";
 
@@ -2138,8 +2138,9 @@ route("DELETE", "/api/revenues/:id", async (_req, params) => {
 });
 
 // Synchronisation des paiements Square → revenus (idempotente par paiement).
+// Le webhook payment.* fait la même chose en temps réel; ce bouton sert de
+// rattrapage (paiements antérieurs à la souscription webhook, ou webhook manqué).
 route("POST", "/api/finances/sync-square", async () => {
-  const db = await getDb();
   let payments;
   try {
     payments = await listSquarePayments(365);
@@ -2149,22 +2150,7 @@ route("POST", "/api/finances/sync-square", async () => {
   }
   let inseres = 0;
   for (const p of payments) {
-    const amount = p.amount_money?.amount ?? 0;
-    if (amount <= 0) continue;
-    const { rows } = await db.query(
-      `INSERT INTO revenues (label, amount_cents, received_on, notes, source, square_payment_id)
-       VALUES ($1, $2, $3::date, $4, 'square', $5)
-       ON CONFLICT (square_payment_id) WHERE square_payment_id IS NOT NULL DO NOTHING
-       RETURNING id`,
-      [
-        `Paiement Square ${p.id.slice(0, 8)}`,
-        amount,
-        (p.created_at ?? new Date().toISOString()).slice(0, 10),
-        p.note ?? "",
-        p.id,
-      ],
-    );
-    if (rows.length) inseres++;
+    if (await applySquarePayment(p)) inseres++;
   }
   return json({ ok: true, paiements: payments.length, nouveauxRevenus: inseres });
 });

@@ -361,6 +361,31 @@ export async function listSquarePayments(days = 365): Promise<SquarePayment[]> {
   return payments.filter((p) => p.status === "COMPLETED");
 }
 
+/**
+ * Enregistre un paiement Square comme revenu (idempotent : la contrainte
+ * unique sur square_payment_id empêche tout doublon). Retourne true si un
+ * nouveau revenu a été inséré. Seuls les paiements COMPLETED sont comptés.
+ */
+export async function applySquarePayment(payment: SquarePayment): Promise<boolean> {
+  const amount = payment.amount_money?.amount ?? 0;
+  if (payment.status !== "COMPLETED" || amount <= 0) return false;
+  const db = await getDb();
+  const { rows } = await db.query(
+    `INSERT INTO revenues (label, amount_cents, received_on, notes, source, square_payment_id)
+     VALUES ($1, $2, $3::date, $4, 'square', $5)
+     ON CONFLICT (square_payment_id) WHERE square_payment_id IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [
+      `Paiement Square ${payment.id.slice(0, 8)}`,
+      amount,
+      (payment.created_at ?? new Date().toISOString()).slice(0, 10),
+      payment.note ?? "",
+      payment.id,
+    ],
+  );
+  return rows.length > 0;
+}
+
 // ---------- Webhook ----------
 
 /**
@@ -384,7 +409,12 @@ export function verifySquareSignature(
 export interface SquareWebhookEvent {
   event_id?: string;
   type?: string;
-  data?: { object?: { invoice?: { id: string; status?: string; public_url?: string } } };
+  data?: {
+    object?: {
+      invoice?: { id: string; status?: string; public_url?: string };
+      payment?: SquarePayment;
+    };
+  };
 }
 
 export async function handleSquareWebhook(event: SquareWebhookEvent): Promise<{
@@ -403,16 +433,32 @@ export async function handleSquareWebhook(event: SquareWebhookEvent): Promise<{
     "INSERT INTO square_events (event_id, event_type, payload) VALUES ($1, $2, $3)",
     [eventId, event.type ?? "inconnu", JSON.stringify(event).slice(0, 10000)],
   );
+
+  // Événements de facture : met à jour le statut du document (contrat « signé »,
+  // facture « payée »…).
   const invoice = event.data?.object?.invoice;
-  if (!event.type?.startsWith("invoice.") || !invoice?.id) {
-    return { processed: false, detail: `Type d'événement ignoré : ${event.type ?? "inconnu"}.` };
+  if (event.type?.startsWith("invoice.") && invoice?.id) {
+    const document = await applySquareInvoiceUpdate(invoice);
+    return {
+      processed: document !== null,
+      detail: document
+        ? `Facture ${document.number} : ${document.statusBefore} → ${document.statusAfter}.`
+        : "Aucun document local ne correspond à cette facture Square.",
+      document,
+    };
   }
-  const document = await applySquareInvoiceUpdate(invoice);
-  return {
-    processed: document !== null,
-    detail: document
-      ? `Facture ${document.number} : ${document.statusBefore} → ${document.statusAfter}.`
-      : "Aucun document local ne correspond à cette facture Square.",
-    document,
-  };
+
+  // Événements de paiement : enregistre l'encaissement comme revenu en temps réel.
+  const payment = event.data?.object?.payment;
+  if (event.type?.startsWith("payment.") && payment?.id) {
+    const inserted = await applySquarePayment(payment);
+    return {
+      processed: inserted,
+      detail: inserted
+        ? `Paiement Square ${payment.id.slice(0, 8)} enregistré comme revenu.`
+        : "Paiement déjà enregistré ou non complété.",
+    };
+  }
+
+  return { processed: false, detail: `Type d'événement ignoré : ${event.type ?? "inconnu"}.` };
 }
