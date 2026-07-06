@@ -185,7 +185,9 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
     connexion repensée; logo « feuille ».
   - **Superficie** : épingle qui « tombe » sur l'adresse repérée +
     **auto-complétion Google Places** (liste sous le champ, jeton de session
-    pour limiter la facturation — API « Places » à activer côté Google Cloud).
+    pour limiter la facturation). API « Places » (legacy + New) et « Geocoding »
+    **confirmées actives en prod** (testées le 2026-07-06 avec la clé de
+    `/api/config` + en-tête Referer) — facturées à l'usage.
   - **Documents** : PDF sans mention « Taxes non applicables… »; **édition**
     d'un document (page `/documents/:id/modifier`, route `PUT`) avec recalcul
     des totaux + **re-synchro Square**; **suppression** retire aussi la facture
