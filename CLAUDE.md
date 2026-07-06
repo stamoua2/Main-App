@@ -2,12 +2,55 @@
 
 Application web de gestion pour **St-Amour du Vert**, entreprise familiale
 d'entretien de pelouse à L'Ange-Gardien (Outaouais, Québec). Propriétaire :
-Alexandre St-Amour. Dépôt distinct du site vitrine `stamourduvert.com`.
+Alexandre St-Amour (astamour8@gmail.com). Dépôt distinct du site vitrine
+`stamourduvert.com`.
 
 - **Interface 100 % en français** (français québécois). Montants en **CAD**.
 - **Superficies affichées uniquement en pi²** (la base garde le métrique à
   l'interne — ne pas exposer de m² dans l'UI).
 - Déployé sur **Netlify** (projet `mainappsav`, https://mainappsav.netlify.app).
+
+## Préférences de travail (à respecter par défaut)
+
+- **Communication en français** avec le propriétaire. Messages de commit et de
+  PR en français. Ne jamais mettre l'identifiant de modèle IA dans un
+  commit/PR/fichier poussé.
+- **Autonomie** : quand une tâche est terminée ET que `npm run build` +
+  `npm run test` sont 100 % verts (et, si l'UI change, une vérification
+  navigateur passe), **committer et pousser sur `main` automatiquement**, puis
+  résumer ce qui a été fait. Pas besoin de demander la permission de pousser.
+- **Discipline « un seul déploiement »** : chaque push sur `main` déclenche un
+  build Netlify facturé. Regrouper le travail et **pousser une seule fois par
+  bloc**. Tout valider en local avant de pousser.
+- **Réduction des crédits** : le propriétaire préfère **démarrer une nouvelle
+  session par nouvelle tâche** (le dépôt + ce fichier suffisent au contexte)
+  plutôt que rouvrir de vieilles conversations. Écrire les réponses de façon
+  concise.
+- **Mise à jour de CE fichier (CLAUDE.md)** : c'est un document vivant. **Avant
+  toute modification, proposer les changements au propriétaire et attendre sa
+  confirmation** avant de committer — pour éviter d'y inscrire une information
+  erronée. Mettre à jour le journal ci-dessous au fil des passes (avec accord).
+
+## Comptes de connexion (application)
+
+> ⚠️ Ces mots de passe sont en clair et se retrouvent dans l'historique Git.
+> Le propriétaire a choisi de les documenter ici. Garder le dépôt privé et les
+> faire tourner au besoin. Mettre à jour cette section si un mot de passe change.
+
+- **alex** (admin) — mot de passe `test123` — vérifié fonctionnel en production.
+  Connexion possible par nom d'utilisateur `alex` ou courriel
+  `alex@stamourduvert.com`. (Mot de passe faible → à changer idéalement.)
+- **cindy** — mot de passe `CindyVert2026!` (valeur connue à la création;
+  confirmer si modifié depuis).
+- La connexion accepte **nom d'utilisateur OU courriel** + mot de passe.
+
+## Coordonnées réelles de l'entreprise (affichées sur les PDF / l'app)
+
+- Courriel : `info@stamourduvert.com`
+- Téléphone : `819-598-7891`
+- Site web : `www.stamourduvert.com`
+- Adresse de base (dépôt, point de départ des routes) : 33, chemin du Graphite,
+  L'Ange-Gardien (Québec) J8L 3J6.
 
 ## Commandes
 
@@ -50,14 +93,15 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
 - `src/pages/` — une page par section (16 pages). `src/api.ts` — client HTTP +
   types partagés. `src/App.tsx` — coquille + navigation (12 entrées).
 
-## Conventions
+## Conventions de code
 
 - **Argent en cents (entiers)** partout. Formatage via `formatCad` (format
   « 1 234,56 $ » avec espace insécable U+00A0). Jamais de flottants pour l'argent.
 - **Champs de saisie standardisés** : styler via les règles globales de
   `src/styles/app.css` (`input`, `select`, `textarea`), pas de styles inline.
 - **Responsive obligatoire** : testé jusqu'à 390 px (mobile) — menu hamburger
-  sous 900 px, tableaux dans `.table-scroll`, `form-grid` en 1 colonne.
+  sous 900 px, tableaux dans `.table-scroll`, `form-grid` en 1 colonne. Sur
+  portable court, la barre latérale ne doit pas nécessiter de défilement.
 - Icônes : **SVG au trait** (style Lucide), jamais d'émoji dans l'UI.
 - Validation des entrées : **zod** côté serveur, messages d'erreur en français.
 
@@ -71,48 +115,97 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
   configurable), ajustable par document.
 - **Forfaits** : Essentiel / Régulier / Élite, **identiques au site vitrine**
   (`seed-data.ts`, vérifiés par `scripts/compare-forfaits.ts`). Calculateur de
-  prix par superficie + marge dans la page Forfaits.
+  prix par superficie + marge dans la page Forfaits. Le « coût par visite » est
+  un **coût interne** (essence, déplacement, main-d'œuvre), jamais facturé.
 - **Square** (production, `connect.squareup.com`) : estimation → brouillon ;
   contrat/facture → publié. Webhook `invoice.*` (statuts) + `payment.*`
   (revenus en temps réel), signature HMAC vérifiée. Idempotence via
-  `square_events`. Tests : `setSquareFetchForTests` (fetch injecté).
+  `square_events`. Tests : `setSquareFetchForTests` (fetch injecté). **Règle
+  PRD** : les tests réels Square utilisent des factures au nom personnel d'Alex
+  ou de Cindy, JAMAIS de vrais clients.
 - **Gemini** (palier gratuit) : texte `gemini-flash-latest`, image
   `gemini-2.5-flash-image`. Quota image limité → message d'erreur clair sur 429.
 
-## Variables d'environnement (Netlify — valeurs jamais dans le dépôt)
+## Variables d'environnement (Netlify — valeurs JAMAIS dans le dépôt)
 
 `NETLIFY_DB_URL` (BD, exposée par l'extension Neon), `SESSION_SECRET`,
 `SEED_ALEX_PASSWORD`, `SQUARE_ACCESS_TOKEN`, `SQUARE_WEBHOOK_SIGNATURE_KEY`,
 `SQUARE_WEBHOOK_NOTIFICATION_URL`, `GOOGLE_MAPS_API_KEY`, `GEMINI_API_KEY`.
 `/api/health` indique la présence (booléens) de ces variables.
 
-## Déploiement & Git
+## Infrastructure (identifiants non secrets, utiles aux outils MCP)
 
-- **Brancher tout le travail sur `main`** (branche par défaut GitHub ET branche
-  de production Netlify). Chaque push sur `main` déclenche **un build Netlify**.
-- **Discipline « un seul déploiement »** : le propriétaire paie des crédits par
-  déploiement. Tout valider en local (build + tests + vérif navigateur) et
-  **regrouper le travail en un seul push** par bloc.
-- Ne jamais mettre l'identifiant de modèle IA dans un commit/PR/fichier poussé.
+- Netlify — projet `mainappsav`, siteId `b5ef1f7c-c8bf-4e55-a515-4bc19199b933`,
+  team `6a29feeeededb4f10030e9c7`. Branche de production : `main`.
+- Badges de déploiement Netlify (tableau de bord de l'app) :
+  gestionnaire `b5ef1f7c-c8bf-4e55-a515-4bc19199b933`,
+  site vitrine `c69739ef-f7a7-4886-8997-12d00c4cd883`.
+- Square — souscription webhook `wbhk_84ed00d201d14cd48126354e7ec4614f`,
+  URL de notification `https://mainappsav.netlify.app/api/webhooks/square`.
+- Dépôt GitHub : `stamoua2/Main-App`.
 
-## Pièges connus (déjà résolus — ne pas refaire)
+## Journal — réussites (état actuel, tout en production)
+
+- **Passe 1 (fondation)** : auth (username/courriel), CRUD clients, forfaits
+  conformes au site vitrine, outil de superficie sur vue satellite Google Maps,
+  PDF estimations/factures avec acompte.
+- **Passe 2 (intégrations)** : synchronisation Square (factures sortantes +
+  paiements par webhook), soumissions du formulaire vitrine → prospect + notif,
+  calendrier de visites + optimisation de routes (Google Routes API).
+- **Passe 3 (opérations)** : inventaire (catalogue OJ 92 produits importé),
+  commandes fournisseurs, finances (revenus/dépenses/marges), marketing,
+  tableau de bord KPI.
+- **Utilisateurs** : système username + gestion (créer/modifier/supprimer),
+  bouton œil pour afficher les mots de passe.
+- **Calculateur de prix des forfaits** : superficie → coût produits + visites →
+  marge ⇄ prix (les deux synchronisés), produits par forfait ajustables, lien
+  à l'inventaire OJ. Saisie et doses en pi²/1000 pi².
+- **pi² partout** dans l'UI, badges Netlify au tableau de bord, coordonnées
+  réelles de l'entreprise sur les PDF.
+- **Contrats** : cycle complet estimation → contrat (CON-) → visites de saison
+  générées automatiquement (déplaçables) → factures supplémentaires; Square
+  gère estimation (brouillon) / contrat / facture; acompte payé = « signé ».
+- **Marketing IA (Gemini)** : génération de texte d'annonce (fonctionne) et
+  d'image (selon quota gratuit), campagnes sauvegardées, image téléchargeable.
+- **Divers passe 4** : acompte auto 50 % (ajustable + configurable), catégories
+  d'inventaire gérables + regroupement, commandes avec TPS/TVQ + livraison
+  (45 $ défaut) + modifier/supprimer, synchronisation des paiements Square vers
+  les revenus (bouton + webhook temps réel).
+- **UI** : champs standardisés partout, responsive mobile complet (menu
+  hamburger < 900 px), barre latérale qui tient sans défilement sur portable.
+- **Webhook Square LIVE en production** : `invoice.*` (statuts) + `payment.*`
+  (revenus temps réel), signature HMAC vérifiée (testé : signature valide → 200,
+  invalide/absente → 401).
+- **Tests** : suite à 107 tests, 100 % verte.
+
+## Journal — pièges résolus (ne pas refaire les mêmes erreurs)
 
 - La BD Netlify est exposée sous **`NETLIFY_DB_URL`** (pas `DATABASE_URL`) —
-  `db.ts` teste les trois noms.
+  `db.ts` teste les trois noms. Symptôme initial : `DbNotProvisionedError`.
 - Driver Neon : appeler **`sql(text, params)`**, pas `sql.query()`.
 - Une variable d'env Netlify marquée **« secret »** n'est PAS visible au runtime
   des fonctions sur ce plan → utiliser des variables **simples**.
-- Changer une variable d'env Netlify n'agit qu'**après un nouveau déploiement**.
+- Changer une variable d'env Netlify n'agit qu'**après un nouveau déploiement**
+  (vérifier via `/api/health` que le booléen passe à `true`).
 - Dans le bac à sable de dev, **l'egress navigateur est bloqué** (Maps/Gemini
-  échouent depuis Playwright) — utiliser l'interception de routes / le shim
-  Maps ; `curl --cacert /root/.ccr/ca-bundle.crt` fonctionne.
+  échouent depuis Playwright) — utiliser l'interception de routes / un shim
+  Maps ; `curl --cacert /root/.ccr/ca-bundle.crt` fonctionne. Les appels IA
+  passent par NOTRE API serveur (qui, elle, a accès au réseau).
 - PGlite renvoie les colonnes `DATE` comme objets `Date` → normaliser avec
   `toIsoDate()`.
-- Money format : utiliser l'échappement explicite `" "` (espace insécable).
+- Money/format : utiliser l'échappement explicite de l'espace insécable
+  (`" "`), jamais le caractère littéral (ambigu dans le code/les tests).
+- Square : la TVQ en pourcentage avait un artefact de virgule flottante
+  (9.975000000000001) → `ratePct()` avec `toFixed(4)` + trim.
+- Barre latérale trop haute sur portable : le bouton « Se déconnecter »
+  disparaissait → menu resserré + `min-height:0` pour tenir sans défilement.
+- Playwright n'est pas installé dans le dépôt : utiliser `playwright-core` +
+  `executablePath: "/opt/pw-browsers/chromium"` (voir scripts de vérif).
 
 ## Tests
 
 `vitest`, base PGlite en mémoire (`PGLITE_MEMORY=1`), `fileParallelism: false`.
 Helpers dans `tests/helpers.ts` (`freshSeededDb`, `api`, `login`, `ALEX`). Les
-intégrations externes (Square, Gemini, Maps) utilisent un `fetch` injecté.
+intégrations externes (Square, Gemini, Maps) utilisent un `fetch` injecté
+(`setSquareFetchForTests`, `setGeminiFetchForTests`, `setMapsFetchForTests`).
 Garder la suite **100 % verte**.
