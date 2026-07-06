@@ -241,22 +241,35 @@ export default function Superficie() {
         }),
       );
       if (estActive) {
-        for (const point of section) {
-          overlaysRef.current.push(
-            new maps.Marker({
-              position: point,
-              map,
-              icon: {
-                path: maps.SymbolPath.CIRCLE,
-                scale: 5,
-                fillColor: "#FFFFFF",
-                fillOpacity: 1,
-                strokeColor: "#174A2D",
-                strokeWeight: 2,
-              },
-            }),
-          );
-        }
+        section.forEach((point, pointIndex) => {
+          const marker = new maps.Marker({
+            position: point,
+            map,
+            draggable: true, // déplaçable pour ajuster un sommet imprécis
+            cursor: "move",
+            title: "Glissez pour déplacer ce point",
+            icon: {
+              path: maps.SymbolPath.CIRCLE,
+              scale: 6,
+              fillColor: "#FFFFFF",
+              fillOpacity: 1,
+              strokeColor: "#174A2D",
+              strokeWeight: 2,
+            },
+          });
+          // Fin du glissement : on met à jour la position de ce sommet dans la
+          // section active (le polygone et la superficie se recalculent).
+          marker.addListener("dragend", (e: any) => {
+            const nouveau = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+            setSections((prev) => {
+              const next = prev.map((s) => s.slice());
+              const derniere = next[next.length - 1];
+              if (pointIndex < derniere.length) derniere[pointIndex] = nouveau;
+              return next;
+            });
+          });
+          overlaysRef.current.push(marker);
+        });
       }
     });
   }, [sections]);
@@ -283,8 +296,9 @@ export default function Superficie() {
       </div>
       <p style={{ color: "var(--muted)", marginTop: -10 }}>
         Cherchez l'adresse du terrain, puis cliquez sur la vue satellite pour tracer le
-        périmètre (3 points ou plus). Terrain divisé ou de forme complexe? Ajoutez
-        autant de sections que nécessaire : le total est la somme des sections.
+        périmètre (3 points ou plus). <strong>Glissez un point</strong> pour l'ajuster,
+        ou retirez le dernier. Terrain divisé ou de forme complexe? Ajoutez autant de
+        sections que nécessaire : le total est la somme des sections.
       </p>
 
       <div className="panel" style={{ marginBottom: 16 }}>

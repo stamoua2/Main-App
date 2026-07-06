@@ -18,6 +18,25 @@ interface FormProduit {
   notes: string;
 }
 
+// Unités de mesure contrôlées (vraies unités seulement — évite le texte libre).
+// Minuscules et cohérentes, comme le recommandent les outils de référence
+// (Sortly, inFlow). L'utilisateur ne peut plus saisir n'importe quoi.
+const UNITES = [
+  "unité",
+  "sac",
+  "boîte",
+  "caisse",
+  "bouteille",
+  "contenant",
+  "rouleau",
+  "paquet",
+  "L",
+  "ml",
+  "kg",
+  "g",
+  "lb",
+];
+
 const PRODUIT_VIDE: FormProduit = {
   name: "",
   category: "",
@@ -27,6 +46,16 @@ const PRODUIT_VIDE: FormProduit = {
   cost: "",
   notes: "",
 };
+
+// Format lisible d'un produit : « 25 kg », « 2 x 10 L », ou l'unité seule.
+// Un format purement numérique (produits manuels) reçoit l'unité; un format
+// libre déjà rédigé (catalogue OJ) est affiché tel quel.
+function formatComplet(p: ProduitInventaire): string {
+  const f = (p.format || "").trim();
+  if (!f) return p.unit || "—";
+  if (/^[\d.,\s x×]+$/i.test(f)) return `${f} ${p.unit}`.trim();
+  return f;
+}
 
 export default function Inventaire() {
   const [produits, setProduits] = useState<ProduitInventaire[]>([]);
@@ -41,7 +70,10 @@ export default function Inventaire() {
   const [edition, setEdition] = useState<FormProduit>(PRODUIT_VIDE);
   const [gererCategories, setGererCategories] = useState(false);
   const [nouvelleCategorie, setNouvelleCategorie] = useState("");
-  const [mouvement, setMouvement] = useState<{ produit: ProduitInventaire; delta: string; reason: string } | null>(null);
+  // Ajustement de stock « bulk » (quantité + raison) affiché en ligne sous le
+  // produit concerné — jamais en haut de la page.
+  const [ajuste, setAjuste] = useState<{ id: number; delta: string; reason: string } | null>(null);
+  const [stockEnCours, setStockEnCours] = useState<number | null>(null);
   const [erreur, setErreur] = useState("");
   const [message, setMessage] = useState("");
 
@@ -77,7 +109,7 @@ export default function Inventaire() {
       await api.post("/api/inventory", {
         name: nouveau.name,
         category: nouveau.category,
-        format: nouveau.format,
+        format: nouveau.format.trim(),
         unit: nouveau.unit,
         quantity: Number(nouveau.quantity.replace(",", ".")) || 0,
         costCents: parseCadToCents(nouveau.cost || "0"),
@@ -115,7 +147,7 @@ export default function Inventaire() {
       await api.put(`/api/inventory/${editionId}`, {
         name: edition.name,
         category: edition.category,
-        format: edition.format,
+        format: edition.format.trim(),
         unit: edition.unit,
         costCents: parseCadToCents(edition.cost || "0"),
         notes: edition.notes,
@@ -154,24 +186,54 @@ export default function Inventaire() {
     await chargerCategories();
   }
 
-  async function appliquerMouvement(e: FormEvent) {
-    e.preventDefault();
-    if (!mouvement) return;
+  // Ajustement rapide : applique un mouvement de stock et met à jour la ligne
+  // sur place (pas de rechargement complet ni de défilement).
+  async function ajusterStock(p: ProduitInventaire, delta: number, reason: string) {
+    if (delta === 0) return;
+    if (p.quantity + delta < 0) {
+      setErreur(`Stock insuffisant pour ${p.name} : ${p.quantity} ${p.unit} en stock.`);
+      return;
+    }
     setErreur("");
+    setStockEnCours(p.id);
     try {
-      const r = await api.post<{ quantiteAvant: number; quantiteApres: number }>(
-        `/api/inventory/${mouvement.produit.id}/movement`,
-        { delta: Number(mouvement.delta.replace(",", ".")), reason: mouvement.reason },
-      );
-      setMessage(
-        `${mouvement.produit.name} : ${r.quantiteAvant} → ${r.quantiteApres} ${mouvement.produit.unit}.`,
-      );
-      setMouvement(null);
-      await charger();
+      const r = await api.post<{ quantiteApres: number }>(`/api/inventory/${p.id}/movement`, {
+        delta,
+        reason: reason || "Ajustement rapide",
+      });
+      setProduits((prev) => prev.map((x) => (x.id === p.id ? { ...x, quantity: r.quantiteApres } : x)));
+      setMessage(`${p.name} : ${p.quantity} → ${r.quantiteApres} ${p.unit}.`);
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Mouvement impossible.");
+    } finally {
+      setStockEnCours(null);
     }
   }
+
+  async function appliquerAjustement(e: FormEvent, p: ProduitInventaire) {
+    e.preventDefault();
+    if (!ajuste) return;
+    const delta = Number(ajuste.delta.replace(",", "."));
+    if (!Number.isFinite(delta) || delta === 0) {
+      setErreur("Entrez une quantité différente de 0 (négatif = sortie).");
+      return;
+    }
+    await ajusterStock(p, delta, ajuste.reason);
+    setAjuste(null);
+  }
+
+  // Sélecteur d'unité : liste contrôlée + conserve une valeur héritée hors liste
+  // (ex. : unité d'un produit OJ) pour ne pas la perdre à l'édition.
+  const selecteurUnite = (valeur: string, onChange: (v: string) => void) => (
+    <select value={valeur} onChange={(e) => onChange(e.target.value)}>
+      {UNITES.map((u) => (
+        <option key={u} value={u}>
+          {u}
+        </option>
+      ))}
+      {valeur && !UNITES.includes(valeur) && <option value={valeur}>{valeur}</option>}
+    </select>
+  );
 
   const selecteurCategorie = (valeur: string, onChange: (v: string) => void) => (
     <select value={valeur} onChange={(e) => onChange(e.target.value)}>
@@ -217,23 +279,30 @@ export default function Inventaire() {
         {selecteurCategorie(valeurs.category, (v) => setValeurs({ ...valeurs, category: v }))}
       </label>
       <label className="field">
+        Unité de mesure
+        {selecteurUnite(valeurs.unit, (v) => setValeurs({ ...valeurs, unit: v }))}
+        <span className="field-hint">Comment le stock est compté.</span>
+      </label>
+      <label className="field">
         Format
         <input
           value={valeurs.format}
-          onChange={(e) => setValeurs({ ...valeurs, format: e.target.value })}
-          placeholder="Sac 25 kg"
+          onChange={(e) =>
+            setValeurs({ ...valeurs, format: e.target.value.replace(/[^\d.,\s x×]/gi, "") })
+          }
+          inputMode="decimal"
+          placeholder="ex. : 25"
         />
-      </label>
-      <label className="field">
-        Unité
-        <input value={valeurs.unit} onChange={(e) => setValeurs({ ...valeurs, unit: e.target.value })} />
+        <span className="field-hint">
+          Taille d'une unité — aperçu : <strong>{valeurs.format.trim() ? `${valeurs.format.trim()} ${valeurs.unit}` : valeurs.unit}</strong>
+        </span>
       </label>
       {avecQuantite && (
         <label className="field">
           Quantité initiale
           <input
             value={valeurs.quantity}
-            onChange={(e) => setValeurs({ ...valeurs, quantity: e.target.value })}
+            onChange={(e) => setValeurs({ ...valeurs, quantity: e.target.value.replace(/[^\d.,]/g, "") })}
             inputMode="decimal"
           />
         </label>
@@ -278,8 +347,8 @@ export default function Inventaire() {
       </div>
       <p style={{ color: "var(--muted)", marginTop: -10 }}>
         {comptes.oj ?? 0} produits du catalogue OJ Compagnie (liste de prix 2026) ·{" "}
-        {comptes.manuel ?? 0} produits ajoutés manuellement. Tous les produits sont
-        modifiables et retirables.
+        {comptes.manuel ?? 0} produits ajoutés manuellement. Ajustez le stock avec les
+        boutons +/− à côté de chaque article.
       </p>
 
       {gererCategories && (
@@ -334,42 +403,6 @@ export default function Inventaire() {
                 Sauvegarder
               </button>
               <button className="btn secondary" type="button" onClick={() => setEditionId(null)}>
-                Annuler
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {mouvement && (
-        <div className="panel">
-          <h2>Mouvement de stock — {mouvement.produit.name}</h2>
-          <form onSubmit={appliquerMouvement}>
-            <div className="form-grid">
-              <label className="field">
-                Quantité (négatif = sortie)
-                <input
-                  value={mouvement.delta}
-                  onChange={(e) => setMouvement({ ...mouvement, delta: e.target.value })}
-                  inputMode="numeric"
-                  placeholder="-1"
-                  required
-                />
-              </label>
-              <label className="field" style={{ gridColumn: "span 2" }}>
-                Raison
-                <input
-                  value={mouvement.reason}
-                  onChange={(e) => setMouvement({ ...mouvement, reason: e.target.value })}
-                  placeholder="Ex. : visite chez Denis Ouellet"
-                />
-              </label>
-            </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button className="btn" type="submit">
-                Appliquer
-              </button>
-              <button className="btn secondary" type="button" onClick={() => setMouvement(null)}>
                 Annuler
               </button>
             </div>
@@ -434,40 +467,105 @@ export default function Inventaire() {
                     <th>Format</th>
                     <th>SKU</th>
                     <th className="num">Coût</th>
-                    <th className="num">En stock</th>
+                    <th style={{ textAlign: "center" }}>En stock</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {groupes.get(nom)!.map((p) => (
-                    <tr key={p.id}>
-                      <td>
-                        {p.name} {p.source === "manuel" && <span className={classeStatut(p.source)}>manuel</span>}
-                      </td>
-                      <td>{p.format || "—"}</td>
-                      <td>{p.sku || "—"}</td>
-                      <td className="num">{formatCad(p.costCents)}</td>
-                      <td className="num">
-                        {p.quantity} {p.unit}
-                      </td>
-                      <td>
-                        <div className="row-actions">
-                          <button
-                            className="btn secondary small"
-                            onClick={() => setMouvement({ produit: p, delta: "-1", reason: "" })}
-                          >
-                            Stock ±
-                          </button>
-                          <button className="btn secondary small" onClick={() => ouvrirEdition(p)}>
-                            Modifier
-                          </button>
-                          <button className="btn danger small" onClick={() => supprimer(p)}>
-                            Retirer
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {groupes.get(nom)!.flatMap((p) => {
+                    const enCours = stockEnCours === p.id;
+                    const lignes = [
+                      <tr key={p.id}>
+                        <td>
+                          {p.name}{" "}
+                          {p.source === "manuel" && <span className={classeStatut(p.source)}>manuel</span>}
+                        </td>
+                        <td>{formatComplet(p)}</td>
+                        <td>{p.sku || "—"}</td>
+                        <td className="num">{formatCad(p.costCents)}</td>
+                        <td>
+                          <div className="stepper">
+                            <button
+                              type="button"
+                              aria-label={`Retirer 1 ${p.unit}`}
+                              onClick={() => ajusterStock(p, -1, "Retrait rapide (−1)")}
+                              disabled={enCours || p.quantity <= 0}
+                            >
+                              −
+                            </button>
+                            <span className="qty">
+                              {p.quantity} <span className="qty-unit">{p.unit}</span>
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Ajouter 1 ${p.unit}`}
+                              onClick={() => ajusterStock(p, 1, "Ajout rapide (+1)")}
+                              disabled={enCours}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              className="btn secondary small"
+                              onClick={() =>
+                                setAjuste(
+                                  ajuste?.id === p.id ? null : { id: p.id, delta: "", reason: "" },
+                                )
+                              }
+                            >
+                              Ajuster…
+                            </button>
+                            <button className="btn secondary small" onClick={() => ouvrirEdition(p)}>
+                              Modifier
+                            </button>
+                            <button className="btn danger small" onClick={() => supprimer(p)}>
+                              Retirer
+                            </button>
+                          </div>
+                        </td>
+                      </tr>,
+                    ];
+                    if (ajuste?.id === p.id) {
+                      lignes.push(
+                        <tr key={`${p.id}-ajuste`} className="inline-edit-row">
+                          <td colSpan={6}>
+                            <form className="toolbar" onSubmit={(e) => appliquerAjustement(e, p)}>
+                              <label className="field" style={{ flex: "0 0 160px" }}>
+                                Quantité (± )
+                                <input
+                                  value={ajuste.delta}
+                                  onChange={(e) =>
+                                    setAjuste({ ...ajuste, delta: e.target.value.replace(/[^\d.,-]/g, "") })
+                                  }
+                                  inputMode="numeric"
+                                  placeholder="ex. : 10 ou -3"
+                                  autoFocus
+                                />
+                              </label>
+                              <label className="field" style={{ flex: "1 1 240px" }}>
+                                Raison (optionnel)
+                                <input
+                                  value={ajuste.reason}
+                                  onChange={(e) => setAjuste({ ...ajuste, reason: e.target.value })}
+                                  placeholder="ex. : réception commande, visite client…"
+                                />
+                              </label>
+                              <button className="btn" type="submit" disabled={enCours}>
+                                Appliquer
+                              </button>
+                              <button className="btn secondary" type="button" onClick={() => setAjuste(null)}>
+                                Annuler
+                              </button>
+                            </form>
+                          </td>
+                        </tr>,
+                      );
+                    }
+                    return lignes;
+                  })}
                 </tbody>
               </table>
             </div>

@@ -258,7 +258,7 @@ export default function Parametres() {
                   />
                 </label>
                 <label className="field">
-                  Nouveau mot de passe (laisser vide pour conserver)
+                  Nouveau mot de passe
                   <ChampMotDePasse
                     value={edition.password}
                     onChange={(v) => setEdition({ ...edition, password: v })}
@@ -266,6 +266,7 @@ export default function Parametres() {
                     placeholder="••••••••"
                     autoComplete="new-password"
                   />
+                  <span className="field-hint">Laisser vide pour conserver l'actuel.</span>
                 </label>
               </div>
               <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
@@ -310,7 +311,7 @@ export default function Parametres() {
               />
             </label>
             <label className="field">
-              Mot de passe (8 caractères min.)
+              Mot de passe
               <ChampMotDePasse
                 value={nouvelUtilisateur.password}
                 onChange={(v) => setNouvelUtilisateur({ ...nouvelUtilisateur, password: v })}
@@ -318,6 +319,7 @@ export default function Parametres() {
                 required
                 autoComplete="new-password"
               />
+              <span className="field-hint">8 caractères minimum.</span>
             </label>
           </div>
           {messageUtil && <div className="ok-text">{messageUtil}</div>}

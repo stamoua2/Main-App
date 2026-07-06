@@ -401,6 +401,38 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
 /* Actions en fin de ligne de tableau */
 .row-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
+/* Pas-à-pas +/- : ajustement rapide du stock, à côté de chaque article. */
+.stepper { display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+.stepper button {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  border: 1px solid var(--border-5, #d8d3c5);
+  background: #fff;
+  color: var(--green-forest);
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.stepper button:hover:not(:disabled) {
+  border-color: var(--green-prairie);
+  color: var(--green-prairie);
+  background: var(--green-pale-3, #f2f5ef);
+}
+.stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+.stepper .qty { min-width: 66px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+.stepper .qty-unit { color: var(--muted-2, #5b6157); font-weight: 500; font-size: 12.5px; }
+
+/* Ligne d'édition intégrée à un tableau (ajustement de stock détaillé). */
+.inline-edit-row > td { background: var(--green-pale-3, #f2f5ef); padding: 14px 10px; }
+.inline-edit-row .toolbar { align-items: flex-end; margin: 0; }
+
 /* Conteneur défilant : les grands tableaux défilent sans casser la page */
 .table-scroll { overflow-x: auto; }
 
