@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["./tests/setup.ts"],
     env: {
       PGLITE_MEMORY: "1",
       SESSION_SECRET: "secret-de-test",

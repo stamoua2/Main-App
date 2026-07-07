@@ -162,6 +162,7 @@ export interface DocumentFacturation {
   squarePaymentStatus: string | null;
   squarePublicUrl: string | null;
   lines?: LigneDocument[];
+  related?: { id: number; kind: "estimation" | "contrat" | "facture"; number: string; status: string }[];
 }
 
 export interface Prospect {

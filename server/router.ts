@@ -878,19 +878,35 @@ route("GET", "/api/documents", async (req) => {
 });
 
 route("GET", "/api/documents/:id", async (_req, params) => {
-  const loaded = await loadDocument(Number(params.id));
+  const id = Number(params.id);
+  const loaded = await loadDocument(id);
   if (!loaded) return error("Document introuvable.", 404);
+  // Documents liés (même lignée) pour afficher le parcours : le parent dont
+  // celui-ci est issu (converted_from_id) et les documents issus de celui-ci.
+  const db = await getDb();
+  const parentId = loaded.row.converted_from_id;
+  const { rows: related } = await db.query<{
+    id: number; kind: string; number: string; status: string;
+  }>(
+    `SELECT id, kind, number, status FROM documents
+     WHERE converted_from_id = $1 OR ($2::int IS NOT NULL AND id = $2)
+     ORDER BY id`,
+    [id, parentId],
+  );
   return json({
-    document: documentToJson(
-      loaded.row,
-      loaded.lines.map((l) => ({
-        id: l.id,
-        description: l.description,
-        quantity: Number(l.quantity),
-        unitPriceCents: l.unit_price_cents,
-        amountCents: l.amount_cents,
-      })),
-    ),
+    document: {
+      ...documentToJson(
+        loaded.row,
+        loaded.lines.map((l) => ({
+          id: l.id,
+          description: l.description,
+          quantity: Number(l.quantity),
+          unitPriceCents: l.unit_price_cents,
+          amountCents: l.amount_cents,
+        })),
+      ),
+      related: related.map((r) => ({ id: r.id, kind: r.kind, number: r.number, status: r.status })),
+    },
   });
 });
 
@@ -943,6 +959,9 @@ async function insertDocument(
       [documentId, i, line.description, line.quantity, line.unitPriceCents, lineAmountCents(line)],
     );
   }
+  // Une facture créée directement part automatiquement vers Square (publiée).
+  // Une estimation reste locale (choix du propriétaire : pas d'encombrement Square).
+  const squareError = data.kind === "facture" ? await autoPushSquare(documentId) : null;
   const loaded = await loadDocument(documentId);
   return json(
     {
@@ -956,6 +975,7 @@ async function insertDocument(
           amountCents: l.amount_cents,
         })),
       ),
+      squareError,
     },
     201,
   );
@@ -1143,6 +1163,19 @@ async function documentResponse(id: number, status = 200): Promise<Response> {
   );
 }
 
+// Envoi automatique vers Square (contrat/facture) : best-effort. On ne fait
+// jamais échouer la création du document si Square est indisponible — on
+// renvoie le message d'erreur pour affichage + bouton « réessayer ».
+async function autoPushSquare(id: number): Promise<string | null> {
+  try {
+    await pushDocumentToSquare(id);
+    return null;
+  } catch (err) {
+    if (err instanceof SquareError) return err.message;
+    throw err;
+  }
+}
+
 // Saison d'entretien : les visites d'un contrat sont réparties du 1er mai au
 // 15 octobre (ou à partir de la semaine prochaine si la saison est entamée).
 export async function generateContractVisits(contractId: number): Promise<number> {
@@ -1197,7 +1230,11 @@ route("POST", "/api/documents/:id/convert", async (_req, params) => {
   }
   const newId = await duplicateDocument(Number(params.id), "facture", "acceptée");
   if (newId === null) return error("Document introuvable.", 404);
-  return documentResponse(newId, 201);
+  // La facture part automatiquement vers Square (publiée).
+  const squareError = await autoPushSquare(newId);
+  const res = await documentResponse(newId, 201);
+  const payload = await res.json();
+  return json({ ...payload, squareError }, 201);
 });
 
 // Estimation acceptée → CONTRAT (+ visites de la saison générées).
@@ -1210,9 +1247,11 @@ route("POST", "/api/documents/:id/contract", async (_req, params) => {
   const newId = await duplicateDocument(Number(params.id), "contrat", "acceptée");
   if (newId === null) return error("Document introuvable.", 404);
   const visites = await generateContractVisits(newId);
+  // Le contrat part automatiquement vers Square (facture publiée avec acompte).
+  const squareError = await autoPushSquare(newId);
   const res = await documentResponse(newId, 201);
   const payload = await res.json();
-  return json({ ...payload, visitesGenerees: visites }, 201);
+  return json({ ...payload, visitesGenerees: visites, squareError }, 201);
 });
 
 // PDF

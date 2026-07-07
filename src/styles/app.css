@@ -660,6 +660,55 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
 
 .doc-meta { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; color: var(--muted); font-size: 14px; }
 
+/* Parcours d'un dossier : Estimation → Contrat → Facture → Payé */
+.lifecycle { display: flex; flex-wrap: wrap; gap: 6px 4px; }
+.lifecycle .step {
+  position: relative;
+  flex: 1 1 130px;
+  min-width: 120px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 10px;
+}
+/* Trait de liaison entre les étapes (masqué sur la dernière) */
+.lifecycle .step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 20px;
+  right: 6px;
+  height: 2px;
+  background: var(--border-3, #e2ded3);
+}
+.lifecycle .step.done:not(:last-child)::after { background: var(--green-ring, #dde8d4); }
+.lifecycle .step .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border-4, #dad5c8);
+  background: #fff;
+  flex-shrink: 0;
+  margin-top: 0;
+  z-index: 1;
+}
+.lifecycle .step.done .dot,
+.lifecycle .step.current .dot { border-color: var(--green-prairie, #2e8255); background: var(--green-prairie, #2e8255); }
+.lifecycle .step.current .dot { box-shadow: 0 0 0 4px var(--green-badge, #e8f0e4); }
+.lifecycle .step-label {
+  display: block;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-2, #5b6157);
+}
+.lifecycle .step.current .step-label,
+.lifecycle .step.done .step-label { color: var(--green-forest, #174a2d); }
+.lifecycle .step-doc { display: block; font-size: 13.5px; }
+.lifecycle .step.todo .step-doc { color: var(--muted-3, #6a7a64); }
+.next-action { margin: 14px 0 0; color: var(--muted, #4a5247); font-size: 13.5px; }
+
 /* ---------- Mobile ---------- */
 
 @media (max-width: 900px) {

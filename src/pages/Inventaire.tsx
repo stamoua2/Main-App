@@ -62,8 +62,8 @@ export default function Inventaire() {
   const [comptes, setComptes] = useState<Record<string, number>>({});
   const [categories, setCategories] = useState<Categorie[]>([]);
   const [recherche, setRecherche] = useState("");
-  const [source, setSource] = useState("");
   const [filtreCategorie, setFiltreCategorie] = useState("");
+  const [enStockSeulement, setEnStockSeulement] = useState(false);
   const [formVisible, setFormVisible] = useState(false);
   const [nouveau, setNouveau] = useState(PRODUIT_VIDE);
   const [editionId, setEditionId] = useState<number | null>(null);
@@ -77,13 +77,12 @@ export default function Inventaire() {
   const charger = useCallback(async () => {
     const params = new URLSearchParams();
     if (recherche) params.set("q", recherche);
-    if (source) params.set("source", source);
     const r = await api.get<{ produits: ProduitInventaire[]; comptes: Record<string, number> }>(
       `/api/inventory?${params}`,
     );
     setProduits(r.produits);
     setComptes(r.comptes);
-  }, [recherche, source]);
+  }, [recherche]);
 
   const chargerCategories = useCallback(async () => {
     const r = await api.get<{ categories: Categorie[] }>("/api/inventory/categories");
@@ -242,9 +241,11 @@ export default function Inventaire() {
   );
 
   // Regroupement par catégorie (après filtre), catégories en ordre alphabétique.
-  const filtres = filtreCategorie
-    ? produits.filter((p) => (p.category || "Sans catégorie") === filtreCategorie)
-    : produits;
+  const filtres = produits.filter((p) => {
+    if (filtreCategorie && (p.category || "Sans catégorie") !== filtreCategorie) return false;
+    if (enStockSeulement && p.quantity < 1) return false;
+    return true;
+  });
   const groupes = new Map<string, ProduitInventaire[]>();
   for (const p of filtres) {
     const cle = p.category || "Sans catégorie";
@@ -422,14 +423,20 @@ export default function Inventaire() {
               ))}
             </select>
           </label>
-          <label className="field">
-            Source
-            <select value={source} onChange={(e) => setSource(e.target.value)}>
-              <option value="">Toutes</option>
-              <option value="oj">Catalogue OJ</option>
-              <option value="manuel">Manuel</option>
-            </select>
-          </label>
+          <button
+            type="button"
+            className={`btn small ${enStockSeulement ? "" : "secondary"}`}
+            onClick={() => setEnStockSeulement((v) => !v)}
+            title="N'afficher que les produits ayant au moins 1 en stock"
+            style={{ alignSelf: "end" }}
+          >
+            {enStockSeulement ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : null}
+            En stock seulement
+          </button>
         </div>
 
         {nomsGroupes.length === 0 && (

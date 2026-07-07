@@ -91,8 +91,8 @@ beforeAll(async () => {
     },
   });
   estimateDocId = est.body.document.id;
-  const converted = await api("POST", `/api/documents/${est.body.document.id}/convert`, { cookie });
-  invoiceDocId = converted.body.document.id;
+  // La conversion en facture (et donc l'envoi auto vers Square) est faite dans
+  // un test ci-dessous pour pouvoir en vérifier la séquence d'appels.
 });
 
 afterAll(() => setSquareFetchForTests(null));
@@ -108,16 +108,18 @@ describe("synchronisation Square — sortante", () => {
     expect(publishCalls).toHaveLength(0);
   });
 
-  it("pousse une facture : client → commande → facture → publication", async () => {
-    const res = await api("POST", `/api/documents/${invoiceDocId}/square`, { cookie });
-    expect(res.status).toBe(201);
-    invoiceSquareId = res.body.square.squareInvoiceId;
-    expect(res.body.square.status).toBe("UNPAID");
-    expect(res.body.square.publicUrl).toContain("squareup.com/pay-invoice");
+  it("convertir en facture l'envoie AUTOMATIQUEMENT vers Square (publiée)", async () => {
+    squareCalls.length = 0;
+    const conv = await api("POST", `/api/documents/${estimateDocId}/convert`, { cookie });
+    expect(conv.status).toBe(201);
+    expect(conv.body.squareError ?? null).toBeNull();
+    invoiceDocId = conv.body.document.id;
+    invoiceSquareId = conv.body.document.squareInvoiceId;
+    expect(invoiceSquareId).toBeTruthy();
+    expect(conv.body.document.squarePaymentStatus).toBe("UNPAID");
 
-    // Séquence d'appels conforme au flux Square
+    // Séquence d'appels conforme au flux Square (client réutilisé)
     const paths = squareCalls.map((c) => `${c.method} ${c.path}`);
-    expect(paths).toContain("POST /v2/customers");
     expect(paths).toContain("POST /v2/orders");
     expect(paths).toContain("POST /v2/invoices");
     expect(paths).toContain(`POST /v2/invoices/${invoiceSquareId}/publish`);
@@ -128,19 +130,14 @@ describe("synchronisation Square — sortante", () => {
       { name: "TPS", percentage: "5", scope: "ORDER" },
       { name: "TVQ", percentage: "9.975", scope: "ORDER" },
     ]);
-    // L'acompte devient une demande de paiement DEPOSIT (dernier envoi = facture)
+    // L'acompte devient une demande de paiement DEPOSIT
     const invoice = squareCalls.filter((c) => c.path === "/v2/invoices").pop()!.body.invoice;
     expect(invoice.payment_requests[0].request_type).toBe("DEPOSIT");
     expect(invoice.payment_requests[0].fixed_amount_requested_money.amount).toBe(20000);
     expect(invoice.delivery_method).toBe("SHARE_MANUALLY");
-
-    // Le document local est lié
-    const doc = await api("GET", `/api/documents/${invoiceDocId}`, { cookie });
-    expect(doc.body.document.squareInvoiceId).toBe(invoiceSquareId);
-    expect(doc.body.document.squarePaymentStatus).toBe("UNPAID");
   });
 
-  it("refuse un double envoi", async () => {
+  it("refuse un double envoi (facture déjà dans Square)", async () => {
     const res = await api("POST", `/api/documents/${invoiceDocId}/square`, { cookie });
     expect(res.status).toBe(409);
   });

@@ -1,23 +1,27 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type DocumentFacturation, type Visite } from "../api";
 import { formatCad, formatPct } from "../../shared/money";
 import { classeStatut } from "../statut";
 
 const KIND_LABELS = { estimation: "Estimation", contrat: "Contrat", facture: "Facture" } as const;
 
+function estPaye(statut: string): boolean {
+  return ["payé", "payée"].includes(statut.toLowerCase());
+}
+
 export default function DetailDocument() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [doc, setDoc] = useState<DocumentFacturation | null>(null);
   const [visites, setVisites] = useState<Visite[]>([]);
   const [message, setMessage] = useState("");
   const [erreur, setErreur] = useState("");
   const [squareEnCours, setSquareEnCours] = useState(false);
 
-  useEffect(() => {
-    setMessage("");
-    api
+  function recharger() {
+    return api
       .get<{ document: DocumentFacturation }>(`/api/documents/${id}`)
       .then((r) => {
         setDoc(r.document);
@@ -30,59 +34,64 @@ export default function DetailDocument() {
         }
       })
       .catch(() => setErreur("Document introuvable."));
-  }, [id]);
-
-  async function convertir() {
-    if (!doc) return;
-    try {
-      const r = await api.post<{ document: DocumentFacturation }>(`/api/documents/${doc.id}/convert`);
-      navigate(`/documents/${r.document.id}`);
-    } catch (err) {
-      setErreur(err instanceof ApiError ? err.message : "Conversion impossible.");
-    }
   }
 
-  // Estimation acceptée → contrat (+ visites de la saison générées).
+  useEffect(() => {
+    // Message transmis par une action précédente (ex. : contrat créé).
+    setMessage((location.state as { message?: string } | null)?.message ?? "");
+    recharger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // Estimation acceptée → contrat (+ visites; le contrat part vers Square auto).
   async function creerContrat() {
     if (!doc) return;
     try {
-      const r = await api.post<{ document: DocumentFacturation; visitesGenerees: number }>(
+      const r = await api.post<{ document: DocumentFacturation; visitesGenerees: number; squareError?: string | null }>(
         `/api/documents/${doc.id}/contract`,
       );
+      const base = `Contrat créé — ${r.visitesGenerees} visites proposées au calendrier (ajustables).`;
       navigate(`/documents/${r.document.id}`, {
-        state: { message: `${r.visitesGenerees} visites générées au calendrier.` },
+        state: {
+          message: r.squareError
+            ? `${base} L'envoi vers Square a échoué (${r.squareError}) — utilisez « Réessayer l'envoi Square ».`
+            : `${base} La facture a été envoyée à Square automatiquement.`,
+        },
       });
-      setMessage(`Contrat créé — ${r.visitesGenerees} visites proposées au calendrier (ajustables).`);
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Création du contrat impossible.");
     }
   }
 
-  async function envoyerSquare() {
+  async function convertir() {
+    if (!doc) return;
+    try {
+      const r = await api.post<{ document: DocumentFacturation; squareError?: string | null }>(
+        `/api/documents/${doc.id}/convert`,
+      );
+      navigate(`/documents/${r.document.id}`, {
+        state: {
+          message: r.squareError
+            ? `Facture créée. L'envoi vers Square a échoué (${r.squareError}) — utilisez « Réessayer l'envoi Square ».`
+            : "Facture créée et envoyée à Square automatiquement.",
+        },
+      });
+    } catch (err) {
+      setErreur(err instanceof ApiError ? err.message : "Conversion impossible.");
+    }
+  }
+
+  // Filet de secours : ré-envoi vers Square si l'envoi automatique a échoué.
+  async function reessayerSquare() {
     if (!doc) return;
     setErreur("");
     setSquareEnCours(true);
     try {
       await api.post(`/api/documents/${doc.id}/square`);
-      const r = await api.get<{ document: DocumentFacturation }>(`/api/documents/${doc.id}`);
-      setDoc(r.document);
+      await recharger();
+      setMessage("Envoyé à Square.");
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Envoi vers Square impossible.");
-    } finally {
-      setSquareEnCours(false);
-    }
-  }
-
-  async function synchroniserSquare() {
-    if (!doc) return;
-    setErreur("");
-    setSquareEnCours(true);
-    try {
-      await api.post(`/api/documents/${doc.id}/square/sync`);
-      const r = await api.get<{ document: DocumentFacturation }>(`/api/documents/${doc.id}`);
-      setDoc(r.document);
-    } catch (err) {
-      setErreur(err instanceof ApiError ? err.message : "Synchronisation impossible.");
     } finally {
       setSquareEnCours(false);
     }
@@ -131,9 +140,34 @@ export default function DetailDocument() {
 
   const estEstimation = doc.kind === "estimation";
   const estContrat = doc.kind === "contrat";
-  // Un document payé est verrouillé; sinon on peut le modifier (les totaux et,
-  // le cas échéant, la facture Square liée sont recalculés/re-synchronisés).
-  const peutModifier = !["payée", "payé"].includes(doc.status) && doc.status !== "refusée";
+  const peutModifier = !estPaye(doc.status) && doc.status !== "refusée";
+  // Contrat/facture qui devrait être dans Square mais n'y est pas (envoi auto
+  // échoué) → on propose de réessayer.
+  const envoiSquareARefaire = !estEstimation && !doc.squareInvoiceId && doc.status !== "refusée";
+
+  // Parcours : le document courant + les documents de la même lignée.
+  const lignee = [
+    { id: doc.id, kind: doc.kind, number: doc.number, status: doc.status },
+    ...(doc.related ?? []),
+  ];
+  const paye = lignee.some((d) => estPaye(d.status));
+  const etapes: { kind: "estimation" | "contrat" | "facture"; label: string }[] = [
+    { kind: "estimation", label: "Estimation" },
+    { kind: "contrat", label: "Contrat" },
+    { kind: "facture", label: "Facture" },
+  ];
+
+  const prochaineAction = estEstimation
+    ? doc.status === "refusée"
+      ? "Estimation refusée — aucune action requise."
+      : "Prochaine étape : « Accepter » pour créer le contrat (envoyé à Square avec acompte), ou « Convertir en facture »."
+    : estContrat
+      ? paye
+        ? "Acompte payé — contrat signé. Ajoutez des factures supplémentaires au besoin."
+        : "En attente du paiement de l'acompte dans Square. Le paiement confirme la signature automatiquement."
+      : paye
+        ? "Facture payée."
+        : "En attente du paiement dans Square. Le statut se met à jour automatiquement (aucune action requise).";
 
   return (
     <>
@@ -146,24 +180,14 @@ export default function DetailDocument() {
           <a className="btn" href={`/api/documents/${doc.id}/pdf`} target="_blank" rel="noreferrer">
             Télécharger le PDF
           </a>
-          {estEstimation && (
+          {estEstimation && doc.status !== "refusée" && (
             <button className="btn secondary" onClick={creerContrat}>
               Accepter → créer le contrat
             </button>
           )}
-          {estEstimation && (
+          {estEstimation && doc.status !== "refusée" && (
             <button className="btn secondary" onClick={convertir}>
               Convertir en facture
-            </button>
-          )}
-          {peutModifier && (
-            <Link className="btn secondary" to={`/documents/${doc.id}/modifier`}>
-              Modifier
-            </Link>
-          )}
-          {estEstimation && doc.status !== "refusée" && (
-            <button className="btn danger" onClick={refuser} disabled={squareEnCours}>
-              {squareEnCours ? "…" : "Refuser"}
             </button>
           )}
           {estContrat && (
@@ -171,20 +195,19 @@ export default function DetailDocument() {
               + Facture supplémentaire
             </Link>
           )}
-          {!doc.squareInvoiceId && (
-            <button className="btn secondary" onClick={envoyerSquare} disabled={squareEnCours}>
-              {squareEnCours
-                ? "Envoi…"
-                : estEstimation
-                  ? "Créer le brouillon Square"
-                  : estContrat
-                    ? "Envoyer le contrat via Square"
-                    : "Envoyer vers Square"}
+          {peutModifier && (
+            <Link className="btn secondary" to={`/documents/${doc.id}/modifier`}>
+              Modifier
+            </Link>
+          )}
+          {envoiSquareARefaire && (
+            <button className="btn secondary" onClick={reessayerSquare} disabled={squareEnCours}>
+              {squareEnCours ? "Envoi…" : "Réessayer l'envoi Square"}
             </button>
           )}
-          {doc.squareInvoiceId && (
-            <button className="btn secondary" onClick={synchroniserSquare} disabled={squareEnCours}>
-              {squareEnCours ? "Synchronisation…" : "Synchroniser le paiement Square"}
+          {estEstimation && doc.status !== "refusée" && (
+            <button className="btn danger" onClick={refuser} disabled={squareEnCours}>
+              {squareEnCours ? "…" : "Refuser"}
             </button>
           )}
           <button className="btn danger" onClick={supprimer}>
@@ -195,12 +218,43 @@ export default function DetailDocument() {
 
       {message && <div className="ok-text">{message}</div>}
       {erreur && <div className="error-text">{erreur}</div>}
-      {estContrat && !doc.squareInvoiceId && (
-        <p style={{ color: "var(--muted)", fontSize: 13, marginTop: -6 }}>
-          Envoyez le contrat via Square : le client reçoit une facture avec acompte —
-          le paiement de l'acompte confirme la signature (statut « signé » automatique).
-        </p>
-      )}
+
+      {/* Parcours du dossier : Estimation → Contrat → Facture → Payé */}
+      <div className="panel">
+        <div className="lifecycle">
+          {etapes.map((e) => {
+            const docs = lignee.filter((d) => d.kind === e.kind);
+            const present = docs.length > 0;
+            const courant = doc.kind === e.kind;
+            return (
+              <div key={e.kind} className={`step ${courant ? "current" : present ? "done" : "todo"}`}>
+                <span className="dot" />
+                <div className="step-body">
+                  <span className="step-label">{e.label}</span>
+                  <span className="step-doc">
+                    {present
+                      ? docs.map((d, i) => (
+                          <span key={d.id}>
+                            {i > 0 && ", "}
+                            {d.id === doc.id ? <strong>{d.number}</strong> : <Link to={`/documents/${d.id}`}>{d.number}</Link>}
+                          </span>
+                        ))
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div className={`step ${paye ? "current done" : "todo"}`}>
+            <span className="dot" />
+            <div className="step-body">
+              <span className="step-label">Payé</span>
+              <span className="step-doc">{paye ? "Reçu" : "En attente"}</span>
+            </div>
+          </div>
+        </div>
+        <p className="next-action">{prochaineAction}</p>
+      </div>
 
       <div className="doc-meta">
         <span>
@@ -215,22 +269,21 @@ export default function DetailDocument() {
         <span>
           <strong>Taxes :</strong> {doc.taxesEnabled ? "TPS/TVQ appliquées" : "non applicables"}
         </span>
-        {doc.convertedFromId && (
+        {doc.squareInvoiceId ? (
           <span>
-            Convertie de l'estimation{" "}
-            <Link to={`/documents/${doc.convertedFromId}`}>#{doc.convertedFromId}</Link>
-          </span>
-        )}
-        {doc.squareInvoiceId && (
-          <span>
-            <strong>Square :</strong> {doc.squareInvoiceId}{" "}
-            <span className="chip">{doc.squarePaymentStatus ?? "—"}</span>{" "}
+            <strong>Square :</strong> <span className="chip plain">{doc.squarePaymentStatus ?? "envoyée"}</span>{" "}
             {doc.squarePublicUrl && (
               <a href={doc.squarePublicUrl} target="_blank" rel="noreferrer">
                 page de paiement
               </a>
             )}
           </span>
+        ) : (
+          !estEstimation && (
+            <span>
+              <strong>Square :</strong> <span className="chip warn">non envoyée</span>
+            </span>
+          )
         )}
       </div>
 

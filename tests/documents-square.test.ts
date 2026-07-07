@@ -138,10 +138,11 @@ describe("Square — répercussion des changements de documents", () => {
 
   it("supprimer une facture PUBLIÉE l'annule dans Square (cancel)", async () => {
     const id = await creerEstimation();
+    // La conversion envoie automatiquement la facture (publiée) vers Square.
     const conv = await api("POST", `/api/documents/${id}/convert`, { cookie });
     const invoiceDocId = conv.body.document.id;
-    const push = await api("POST", `/api/documents/${invoiceDocId}/square`, { cookie });
-    const invId = push.body.square.squareInvoiceId;
+    const invId = conv.body.document.squareInvoiceId;
+    expect(invId).toBeTruthy();
     expect(invoices.get(invId)?.status).toBe("UNPAID");
 
     calls.length = 0;
@@ -186,10 +187,10 @@ describe("Square — répercussion des changements de documents", () => {
 
   it("refuse de modifier un document payé", async () => {
     const id = await creerEstimation();
+    // Conversion → facture envoyée automatiquement vers Square.
     const conv = await api("POST", `/api/documents/${id}/convert`, { cookie });
     const facId = conv.body.document.id;
-    const push = await api("POST", `/api/documents/${facId}/square`, { cookie });
-    const invId = push.body.square.squareInvoiceId;
+    const invId = conv.body.document.squareInvoiceId;
     // Simule un paiement complet côté Square puis synchronise.
     invoices.get(invId)!.status = "PAID";
     await api("POST", `/api/documents/${facId}/square/sync`, { cookie });
