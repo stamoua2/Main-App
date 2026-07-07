@@ -196,6 +196,18 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
     / cancel publiée).
   - **Connexion** : session limitée à **24 h** (`SESSION_HOURS`, cookie
     `Max-Age=86400`) → reconnexion quotidienne forcée.
+- **Passe 6 (Inventaire + Square auto + parcours)** :
+  - **Inventaire** : quantité éditable en ligne + boutons +/− (plus de
+    formulaire d'ajustement séparé); unité = **menu déroulant contrôlé**
+    (`UNITES`), format **numérique** avec aperçu « 25 kg »; filtre **« en stock
+    seulement »**; filtre « Source » retiré. Actions : « Ajuster le stock » a été
+    remplacé par l'édition directe; il reste « Modifier la fiche » / « Retirer ».
+  - **Documents** : contrat et facture → **envoi Square automatique** (best-effort
+    via `autoPushSquare` dans les routes `contract` / `convert` / création de
+    facture); **l'estimation reste locale**. Le webhook gère l'entrant → **plus
+    de bouton de synchro manuel**; seul « Réessayer l'envoi Square » apparaît si
+    l'envoi auto a échoué. **Parcours** clarifié (Estimation → Contrat → Facture
+    → Payé) avec liens `related` (route `GET /api/documents/:id` enrichie).
 - **Tests** : suite à 115 tests, 100 % verte.
 
 ## Journal — pièges résolus (ne pas refaire les mêmes erreurs)
@@ -246,4 +258,8 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
 Helpers dans `tests/helpers.ts` (`freshSeededDb`, `api`, `login`, `ALEX`). Les
 intégrations externes (Square, Gemini, Maps) utilisent un `fetch` injecté
 (`setSquareFetchForTests`, `setGeminiFetchForTests`, `setMapsFetchForTests`).
-Garder la suite **100 % verte**.
+`tests/setup.ts` (via `setupFiles`) installe un **fetch Square neutre** par
+défaut : comme la création d'un contrat/facture déclenche l'envoi Square auto,
+ceci évite tout appel réseau réel dans les tests qui ne visent pas Square. Les
+fichiers Square (`square.test.ts`, `documents-square.test.ts`) installent leur
+propre simulation dans leur `beforeAll`. Garder la suite **100 % verte**.
