@@ -226,13 +226,15 @@ async function nextDocumentNumber(kind: "estimation" | "contrat" | "facture"): P
   const db = await getDb();
   const prefix = kind === "estimation" ? "EST" : kind === "contrat" ? "CON" : "FAC";
   const year = new Date().getFullYear();
-  const { rows } = await db.query<{ number: string }>(
-    "SELECT number FROM documents WHERE number LIKE $1 ORDER BY number DESC LIMIT 1",
-    [`${prefix}-${year}-%`],
+  // Compteur persistant, jamais décrémenté : un numéro supprimé n'est jamais
+  // réémis (évite les collisions de numéro dans Square). Incrément atomique.
+  const { rows } = await db.query<{ last_seq: number }>(
+    `INSERT INTO document_counters (prefix, year, last_seq) VALUES ($1, $2, 1)
+     ON CONFLICT (prefix, year) DO UPDATE SET last_seq = document_counters.last_seq + 1
+     RETURNING last_seq`,
+    [prefix, year],
   );
-  const last = rows[0]?.number;
-  const next = last ? Number(last.split("-")[2]) + 1 : 1;
-  return `${prefix}-${year}-${String(next).padStart(4, "0")}`;
+  return `${prefix}-${year}-${String(rows[0].last_seq).padStart(4, "0")}`;
 }
 
 interface DocumentRow {

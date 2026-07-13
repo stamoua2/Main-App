@@ -300,6 +300,29 @@ export const DDL: string[] = [
   // Acompte par défaut (% du total, ajustable document par document).
   `ALTER TABLE settings ADD COLUMN IF NOT EXISTS deposit_pct NUMERIC(6,2) NOT NULL DEFAULT 50`,
 
+  // ---- Numérotation des documents : compteur persistant ----
+  // Les numéros (EST-/CON-/FAC-) ne doivent JAMAIS être réémis, même après la
+  // suppression d'un document — sinon un nouveau document reprend un numéro déjà
+  // utilisé dans Square (facture annulée mais numéro conservé) → « invoice number
+  // already used ». On tient donc un compteur par préfixe/année qui n'est jamais
+  // décrémenté, plutôt que de calculer « max + 1 » sur les documents existants.
+  `CREATE TABLE IF NOT EXISTS document_counters (
+    prefix TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (prefix, year)
+  )`,
+  // Amorçage à partir des documents déjà présents (une seule fois par clé).
+  `INSERT INTO document_counters (prefix, year, last_seq)
+     SELECT split_part(number, '-', 1), split_part(number, '-', 2)::int,
+            max(split_part(number, '-', 3)::int)
+     FROM documents WHERE number LIKE '___-____-%'
+     GROUP BY 1, 2
+     ON CONFLICT (prefix, year) DO NOTHING`,
+  // Nombre d'envois Square effectués pour ce document : garantit un
+  // invoice_number unique à chaque (ré)envoi vers Square.
+  `ALTER TABLE documents ADD COLUMN IF NOT EXISTS square_send_count INTEGER NOT NULL DEFAULT 0`,
+
   // ---- Commandes fournisseurs : taxes et livraison ----
   `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS subtotal_cents INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE supplier_orders ADD COLUMN IF NOT EXISTS shipping_cents INTEGER NOT NULL DEFAULT 4500`,

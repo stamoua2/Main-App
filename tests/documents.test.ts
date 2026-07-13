@@ -115,4 +115,19 @@ describe("estimations et factures", () => {
     const res = await api("DELETE", `/api/clients/${clientId}`, { cookie });
     expect(res.status).toBe(409);
   });
+
+  it("ne réémet jamais un numéro supprimé (évite les collisions Square)", async () => {
+    const a = await api("POST", "/api/documents", {
+      cookie,
+      body: { kind: "estimation", clientId, lines: [{ description: "Jetable", quantity: 1, unitPriceCents: 1000 }] },
+    });
+    const numeroA = a.body.document.number;
+    // Suppression du document : son numéro ne doit PAS être réutilisé ensuite.
+    await api("DELETE", `/api/documents/${a.body.document.id}`, { cookie });
+    const b = await api("POST", "/api/documents", {
+      cookie,
+      body: { kind: "estimation", clientId, lines: [{ description: "Suivant", quantity: 1, unitPriceCents: 1000 }] },
+    });
+    expect(b.body.document.number).not.toBe(numeroA);
+  });
 });
