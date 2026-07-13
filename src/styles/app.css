@@ -198,6 +198,17 @@ h1, h2, h3 {
   color: var(--green-prairie, #2e8255);
   margin-bottom: 4px;
 }
+.retour-lien {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted, #4a5247);
+  text-decoration: none;
+  margin-bottom: 8px;
+}
+.retour-lien:hover { color: var(--green-prairie, #2e8255); }
 
 /* ---------- Composants ---------- */
 

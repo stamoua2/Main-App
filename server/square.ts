@@ -115,12 +115,21 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
     tvq_rate: string;
     deposit_cents: number;
     square_invoice_id: string | null;
+    square_send_count: number;
   }>("SELECT * FROM documents WHERE id = $1", [documentId]);
   const doc = docs[0];
   if (!doc) throw new SquareError("Document introuvable.", 404, null);
   if (doc.square_invoice_id) {
     throw new SquareError(`Ce document est déjà dans Square (${doc.square_invoice_id}).`, 409, null);
   }
+  // Square exige un invoice_number unique par emplacement, et le conserve même
+  // après annulation. À chaque (ré)envoi on incrémente donc un compteur et on
+  // suffixe le numéro dès le 2e envoi (« CON-2026-0001-R2 »…) pour ne jamais
+  // heurter un numéro déjà utilisé côté Square. Le compteur est persisté AVANT
+  // l'appel : ainsi un « Réessayer » après un échec obtient un numéro neuf.
+  const sendAttempt = (doc.square_send_count ?? 0) + 1;
+  const invoiceNumber = sendAttempt === 1 ? doc.number : `${doc.number}-R${sendAttempt}`;
+  await db.query("UPDATE documents SET square_send_count = $1 WHERE id = $2", [sendAttempt, documentId]);
   // Estimation : créée en BROUILLON dans Square (visible au tableau de bord
   // Square, jamais envoyée au client). Contrat et facture : publiés.
   const publier = doc.kind !== "estimation";
@@ -207,7 +216,7 @@ export async function pushDocumentToSquare(documentId: number): Promise<PushResu
       primary_recipient: { customer_id: customerId },
       payment_requests: paymentRequests,
       delivery_method: "SHARE_MANUALLY",
-      invoice_number: doc.number,
+      invoice_number: invoiceNumber,
       title:
         doc.kind === "contrat"
           ? "St-Amour du Vert — Contrat d'entretien de pelouse"

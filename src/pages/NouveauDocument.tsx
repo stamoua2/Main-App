@@ -10,6 +10,7 @@ import {
 } from "../api";
 import { formatCad, formatPct, parseCadToCents } from "../../shared/money";
 import { computeTotals } from "../../shared/taxes";
+import { Retour } from "../components/Retour";
 
 interface LigneEdition {
   description: string;
@@ -29,7 +30,11 @@ export default function NouveauDocument() {
   const [parametres, setParametres] = useState<Parametres | null>(null);
   const [clientId, setClientId] = useState(searchParams.get("client") ?? "");
   const [kind, setKind] = useState<"estimation" | "contrat" | "facture">(
-    searchParams.get("type") === "facture" ? "facture" : "estimation",
+    searchParams.get("type") === "facture"
+      ? "facture"
+      : searchParams.get("type") === "contrat"
+        ? "contrat"
+        : "estimation",
   );
   const [numero, setNumero] = useState("");
   const [aFactureSquare, setAFactureSquare] = useState(false);
@@ -146,7 +151,11 @@ export default function NouveauDocument() {
         });
         navigate(`/documents/${r.document.id}`);
       } else {
-        const r = await api.post<{ document: DocumentFacturation }>("/api/documents", {
+        const r = await api.post<{
+          document: DocumentFacturation;
+          squareError?: string | null;
+          visitesGenerees?: number;
+        }>("/api/documents", {
           kind,
           clientId: Number(clientId),
           taxesEnabled: taxes,
@@ -154,7 +163,20 @@ export default function NouveauDocument() {
           notes,
           lines: lignesValides,
         });
-        navigate(`/documents/${r.document.id}`);
+        // Un contrat/une facture part automatiquement vers Square : on transmet
+        // un message de confirmation (ou d'échec d'envoi) à la page de détail.
+        let message = "";
+        if (kind === "contrat") {
+          const base = `Contrat créé — ${r.visitesGenerees ?? 0} visites proposées au calendrier (ajustables).`;
+          message = r.squareError
+            ? `${base} L'envoi vers Square a échoué (${r.squareError}) — utilisez « Réessayer l'envoi Square ».`
+            : `${base} La facture a été envoyée à Square automatiquement.`;
+        } else if (kind === "facture") {
+          message = r.squareError
+            ? `Facture créée. L'envoi vers Square a échoué (${r.squareError}) — utilisez « Réessayer l'envoi Square ».`
+            : "Facture créée et envoyée à Square automatiquement.";
+        }
+        navigate(`/documents/${r.document.id}`, message ? { state: { message } } : undefined);
       }
     } catch (err) {
       setErreur(err instanceof ApiError ? err.message : "Erreur lors de l'enregistrement.");
@@ -167,13 +189,18 @@ export default function NouveauDocument() {
     <>
       <div className="page-head">
         <div>
+          <Retour to={enEdition ? `/documents/${editId}` : "/documents"}>
+            {enEdition ? "Retour au document" : "Estimations & factures"}
+          </Retour>
           <div className="eyebrow">Facturation</div>
           <h1>
             {enEdition
               ? `Modifier ${numero || (kind === "facture" ? "la facture" : kind === "contrat" ? "le contrat" : "l'estimation")}`
               : kind === "facture"
                 ? "Nouvelle facture"
-                : "Nouvelle estimation"}
+                : kind === "contrat"
+                  ? "Nouveau contrat"
+                  : "Nouvelle estimation"}
           </h1>
         </div>
       </div>
@@ -212,8 +239,12 @@ export default function NouveauDocument() {
                   disabled
                 />
               ) : (
-                <select value={kind} onChange={(e) => setKind(e.target.value as "estimation" | "facture")}>
+                <select
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as "estimation" | "contrat" | "facture")}
+                >
                   <option value="estimation">Estimation</option>
+                  <option value="contrat">Contrat (envoi Square + visites de saison)</option>
                   <option value="facture">Facture (ex. : service supplémentaire)</option>
                 </select>
               )}
@@ -359,7 +390,9 @@ export default function NouveauDocument() {
                   ? "Enregistrer les modifications"
                   : kind === "facture"
                     ? "Créer la facture"
-                    : "Créer l'estimation"}
+                    : kind === "contrat"
+                      ? "Créer le contrat"
+                      : "Créer l'estimation"}
             </button>
             {enEdition && (
               <button

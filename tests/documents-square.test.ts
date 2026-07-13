@@ -12,7 +12,7 @@ import { ALEX, api, freshSeededDb, login } from "./helpers.js";
 let cookie: string;
 let clientId: number;
 const calls: { method: string; path: string }[] = [];
-const invoices = new Map<string, { id: string; version: number; status: string }>();
+const invoices = new Map<string, { id: string; version: number; status: string; number?: string }>();
 let counter = 0;
 
 function fakeSquareFetch(): typeof fetch {
@@ -33,7 +33,8 @@ function fakeSquareFetch(): typeof fetch {
     }
     if (path === "/v2/invoices" && method === "POST") {
       const id = `inv:TEST-${String(++counter).padStart(4, "0")}`;
-      invoices.set(id, { id, version: 0, status: "DRAFT" });
+      const number = JSON.parse(init?.body ?? "{}")?.invoice?.invoice_number as string | undefined;
+      invoices.set(id, { id, version: 0, status: "DRAFT", number });
       return respond({ invoice: invoices.get(id) });
     }
     const publish = path.match(/^\/v2\/invoices\/(.+)\/publish$/);
@@ -183,6 +184,29 @@ describe("Square — répercussion des changements de documents", () => {
     expect(nouvelInvId).not.toBe(ancienInvId);
     expect(invoices.has(ancienInvId)).toBe(false);
     expect(invoices.has(nouvelInvId)).toBe(true);
+  });
+
+  it("un ré-envoi Square utilise un invoice_number unique (suffixe -R2)", async () => {
+    const id = await creerEstimation(100000);
+    const push1 = await api("POST", `/api/documents/${id}/square`, { cookie });
+    const inv1 = push1.body.square.squareInvoiceId;
+    const numero1 = invoices.get(inv1)?.number;
+    expect(numero1).toBeTruthy();
+
+    // Modification → l'ancienne facture Square est retirée puis recréée : le
+    // nouvel invoice_number doit différer (suffixe) pour ne pas heurter Square.
+    const res = await api("PUT", `/api/documents/${id}`, {
+      cookie,
+      body: {
+        taxesEnabled: false,
+        depositCents: 0,
+        notes: "Révision",
+        lines: [{ description: "Service révisé", quantity: 1, unitPriceCents: 120000 }],
+      },
+    });
+    const inv2 = res.body.document.squareInvoiceId;
+    const numero2 = invoices.get(inv2)?.number;
+    expect(numero2).toBe(`${numero1}-R2`);
   });
 
   it("refuse de modifier un document payé", async () => {
