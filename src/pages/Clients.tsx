@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type Client, type Forfait } from "../api";
-import { m2ToFt2 } from "../../shared/area";
+import { ft2ToM2, m2ToFt2 } from "../../shared/area";
 import { classeStatut } from "../statut";
 
 const CLIENT_VIDE = {
@@ -16,6 +16,7 @@ const CLIENT_VIDE = {
   status: "actif",
   notes: "",
   packageId: null as number | null,
+  lotAreaM2: null as number | null,
 };
 
 export type FormulaireClient = typeof CLIENT_VIDE;
@@ -32,11 +33,21 @@ export function FormClient({
   onAnnule?: () => void;
 }) {
   const [form, setForm] = useState(initial);
+  // Superficie saisie/affichée en pi² (la base garde le métrique à l'interne).
+  const [superficiePi2, setSuperficiePi2] = useState(
+    initial.lotAreaM2 ? String(Math.round(m2ToFt2(initial.lotAreaM2))) : "",
+  );
   const [erreur, setErreur] = useState("");
   const [enCours, setEnCours] = useState(false);
 
   function champ<K extends keyof FormulaireClient>(key: K, value: FormulaireClient[K]) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function changerSuperficie(valeur: string) {
+    setSuperficiePi2(valeur);
+    const pi2 = Number(valeur.replace(/[^\d.,]/g, "").replace(",", "."));
+    champ("lotAreaM2", valeur.trim() && pi2 > 0 ? Math.round(ft2ToM2(pi2) * 100) / 100 : null);
   }
 
   async function soumettre(e: FormEvent) {
@@ -113,6 +124,16 @@ export function FormClient({
             <option value="actif">Actif</option>
             <option value="inactif">Inactif</option>
           </select>
+        </label>
+        <label className="field">
+          Superficie du terrain (pi²)
+          <input
+            value={superficiePi2}
+            onChange={(e) => changerSuperficie(e.target.value)}
+            inputMode="numeric"
+            placeholder="Ex. : 5 000"
+          />
+          <span className="field-hint">Saisie manuelle. Ou mesurez-la sur la carte (page Superficie).</span>
         </label>
         <label className="field" style={{ gridColumn: "1 / -1" }}>
           Notes

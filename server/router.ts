@@ -959,9 +959,14 @@ async function insertDocument(
       [documentId, i, line.description, line.quantity, line.unitPriceCents, lineAmountCents(line)],
     );
   }
-  // Une facture créée directement part automatiquement vers Square (publiée).
-  // Une estimation reste locale (choix du propriétaire : pas d'encombrement Square).
-  const squareError = data.kind === "facture" ? await autoPushSquare(documentId) : null;
+  // Un contrat créé directement génère les visites de la saison (comme lors de
+  // l'acceptation d'une estimation).
+  const visitesGenerees = data.kind === "contrat" ? await generateContractVisits(documentId) : 0;
+  // Contrat ET facture partent automatiquement vers Square (facture publiée avec
+  // acompte). Une estimation reste locale (choix du propriétaire : pas
+  // d'encombrement Square).
+  const squareError =
+    data.kind === "facture" || data.kind === "contrat" ? await autoPushSquare(documentId) : null;
   const loaded = await loadDocument(documentId);
   return json(
     {
@@ -976,6 +981,7 @@ async function insertDocument(
         })),
       ),
       squareError,
+      visitesGenerees,
     },
     201,
   );
@@ -1070,6 +1076,10 @@ route("DELETE", "/api/documents/:id", async (_req, params) => {
     const res = squareErrorToResponse(err, "Retrait Square impossible");
     if (res) return res;
   }
+  // Le calendrier suit les contrats : les visites générées par ce document
+  // (document_id = id) sont retirées en même temps que lui (sinon des
+  // planifications orphelines resteraient au calendrier).
+  await db.query("DELETE FROM visits WHERE document_id = $1", [id]);
   const { rows } = await db.query("DELETE FROM documents WHERE id = $1 RETURNING id", [id]);
   if (!rows.length) return error("Document introuvable.", 404);
   return json({ ok: true, supprime: id });

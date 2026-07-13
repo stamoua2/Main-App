@@ -5,6 +5,7 @@ import { m2ToFt2 } from "../../shared/area";
 import { formatCad } from "../../shared/money";
 import { FormClient } from "./Clients";
 import { classeStatut } from "../statut";
+import { Retour } from "../components/Retour";
 
 export default function FicheClient() {
   const { id } = useParams();
@@ -46,6 +47,7 @@ export default function FicheClient() {
     <>
       <div className="page-head">
         <div>
+          <Retour to="/clients">Clients</Retour>
           <div className="eyebrow">Fiche client</div>
           <h1>{client.fullName}</h1>
         </div>
@@ -77,6 +79,7 @@ export default function FicheClient() {
               status: client.status,
               notes: client.notes,
               packageId: client.packageId,
+              lotAreaM2: client.lotAreaM2,
             }}
             forfaits={forfaits}
             onSauvegarde={async (data) => {

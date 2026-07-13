@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type DocumentFacturation, type Visite } from "../api";
 import { formatCad, formatPct } from "../../shared/money";
 import { classeStatut } from "../statut";
+import { Retour } from "../components/Retour";
 
 const KIND_LABELS = { estimation: "Estimation", contrat: "Contrat", facture: "Facture" } as const;
 
@@ -151,20 +152,32 @@ export default function DetailDocument() {
     ...(doc.related ?? []),
   ];
   const paye = lignee.some((d) => estPaye(d.status));
+  const contratLie = lignee.find((d) => d.kind === "contrat");
+  const factureLiee = lignee.find((d) => d.kind === "facture");
+  // Estimation déjà traitée : refusée, marquée acceptée, ou ayant déjà donné un
+  // contrat/une facture → on ne réaffiche PAS « Accepter »/« Convertir » (évite
+  // de créer des doublons et la confusion « on se perd »).
+  const estimationTraitee =
+    estEstimation &&
+    (doc.status === "refusée" || doc.status === "acceptée" || Boolean(contratLie) || Boolean(factureLiee));
+  const peutAccepter = estEstimation && !estimationTraitee;
   const etapes: { kind: "estimation" | "contrat" | "facture"; label: string }[] = [
     { kind: "estimation", label: "Estimation" },
     { kind: "contrat", label: "Contrat" },
     { kind: "facture", label: "Facture" },
   ];
 
+  const suivant = contratLie ?? factureLiee;
   const prochaineAction = estEstimation
     ? doc.status === "refusée"
       ? "Estimation refusée — aucune action requise."
-      : "Prochaine étape : « Accepter » pour créer le contrat (envoyé à Square avec acompte), ou « Convertir en facture »."
+      : estimationTraitee
+        ? `Estimation acceptée${suivant ? ` — suivez le dossier dans ${suivant.kind === "contrat" ? "le contrat" : "la facture"} ${suivant.number}.` : "."}`
+        : "Prochaine étape : « Accepter » crée le contrat (envoyé à Square avec l'acompte) et génère les visites de la saison. Sinon, « Convertir en facture » facture directement, sans contrat."
     : estContrat
       ? paye
         ? "Acompte payé — contrat signé. Ajoutez des factures supplémentaires au besoin."
-        : "En attente du paiement de l'acompte dans Square. Le paiement confirme la signature automatiquement."
+        : "Contrat envoyé à Square. Dès que l'acompte est payé, le statut passe à « signé » automatiquement (aucune action requise ici)."
       : paye
         ? "Facture payée."
         : "En attente du paiement dans Square. Le statut se met à jour automatiquement (aucune action requise).";
@@ -173,31 +186,25 @@ export default function DetailDocument() {
     <>
       <div className="page-head">
         <div>
+          <Retour to="/documents">Estimations & factures</Retour>
           <div className="eyebrow">{KIND_LABELS[doc.kind]}</div>
           <h1>{doc.number}</h1>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a className="btn" href={`/api/documents/${doc.id}/pdf`} target="_blank" rel="noreferrer">
-            Télécharger le PDF
-          </a>
-          {estEstimation && doc.status !== "refusée" && (
-            <button className="btn secondary" onClick={creerContrat}>
+          {/* Action principale du dossier, mise en avant */}
+          {peutAccepter && (
+            <button className="btn" onClick={creerContrat}>
               Accepter → créer le contrat
             </button>
           )}
-          {estEstimation && doc.status !== "refusée" && (
+          {peutAccepter && (
             <button className="btn secondary" onClick={convertir}>
               Convertir en facture
             </button>
           )}
           {estContrat && (
-            <Link className="btn secondary" to={`/documents/nouveau?client=${doc.clientId}&type=facture`}>
+            <Link className="btn" to={`/documents/nouveau?client=${doc.clientId}&type=facture`}>
               + Facture supplémentaire
-            </Link>
-          )}
-          {peutModifier && (
-            <Link className="btn secondary" to={`/documents/${doc.id}/modifier`}>
-              Modifier
             </Link>
           )}
           {envoiSquareARefaire && (
@@ -205,7 +212,15 @@ export default function DetailDocument() {
               {squareEnCours ? "Envoi…" : "Réessayer l'envoi Square"}
             </button>
           )}
-          {estEstimation && doc.status !== "refusée" && (
+          <a className="btn secondary" href={`/api/documents/${doc.id}/pdf`} target="_blank" rel="noreferrer">
+            Télécharger le PDF
+          </a>
+          {peutModifier && (
+            <Link className="btn secondary" to={`/documents/${doc.id}/modifier`}>
+              Modifier
+            </Link>
+          )}
+          {peutAccepter && (
             <button className="btn danger" onClick={refuser} disabled={squareEnCours}>
               {squareEnCours ? "…" : "Refuser"}
             </button>

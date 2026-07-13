@@ -131,6 +131,44 @@ describe("cycle estimation → contrat → facture", () => {
   });
 });
 
+describe("contrat créé directement + synchronisation du calendrier", () => {
+  it("un contrat créé directement génère ses visites de saison", async () => {
+    const res = await api("POST", "/api/documents", {
+      cookie,
+      body: {
+        kind: "contrat",
+        clientId,
+        lines: [{ description: "Forfait saison 2026", quantity: 1, unitPriceCents: 90000 }],
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.document.kind).toBe("contrat");
+    expect(res.body.document.number).toMatch(/^CON-/);
+    expect(res.body.visitesGenerees).toBeGreaterThanOrEqual(3);
+    const visites = await api("GET", `/api/visits?documentId=${res.body.document.id}`, { cookie });
+    expect(visites.body.visites).toHaveLength(res.body.visitesGenerees);
+  });
+
+  it("supprimer un contrat retire ses visites du calendrier", async () => {
+    const res = await api("POST", "/api/documents", {
+      cookie,
+      body: {
+        kind: "contrat",
+        clientId,
+        lines: [{ description: "Contrat à supprimer", quantity: 1, unitPriceCents: 50000 }],
+      },
+    });
+    const contrat = res.body.document.id;
+    const avant = await api("GET", `/api/visits?documentId=${contrat}`, { cookie });
+    expect(avant.body.visites.length).toBeGreaterThan(0);
+
+    const del = await api("DELETE", `/api/documents/${contrat}`, { cookie });
+    expect(del.status).toBe(200);
+    const apres = await api("GET", `/api/visits?documentId=${contrat}`, { cookie });
+    expect(apres.body.visites).toHaveLength(0);
+  });
+});
+
 describe("commandes fournisseurs : modification et suppression", () => {
   let orderId: number;
 
