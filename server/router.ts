@@ -1397,6 +1397,55 @@ route("GET", "/api/dashboard", async () => {
   });
 });
 
+// Pipeline de vente : regroupe les documents par étape du cycle
+// (estimation → contrat → facture → payé), avec le compte et la valeur totale
+// par étape. Une estimation acceptée n'est pas comptée deux fois : elle est
+// représentée par le contrat qui en découle. Une estimation refusée va en
+// « Refusé ». Sert à la fois la page Pipeline et le résumé du tableau de bord.
+const PIPELINE_ETAPES = [
+  { cle: "estimation", titre: "Estimations" },
+  { cle: "contrat", titre: "Contrats" },
+  { cle: "facture", titre: "Factures à payer" },
+  { cle: "paye", titre: "Payé" },
+  { cle: "perdu", titre: "Refusé" },
+] as const;
+
+function etapePipeline(row: DocumentRow): string | null {
+  if (row.kind === "estimation") {
+    if (row.status === "refusée") return "perdu";
+    if (row.status === "brouillon" || row.status === "envoyée") return "estimation";
+    return null; // acceptée : représentée par son contrat
+  }
+  if (row.kind === "contrat") return "contrat";
+  if (row.kind === "facture") return row.status === "payée" ? "paye" : "facture";
+  return null;
+}
+
+route("GET", "/api/pipeline", async () => {
+  const db = await getDb();
+  const { rows } = await db.query<DocumentRow>(
+    `SELECT d.*, (c.first_name || ' ' || c.last_name) AS client_name
+     FROM documents d JOIN clients c ON c.id = d.client_id
+     ORDER BY d.issued_on DESC, d.id DESC`,
+  );
+  const stages = PIPELINE_ETAPES.map((e) => ({
+    cle: e.cle as string,
+    titre: e.titre,
+    deals: [] as ReturnType<typeof documentToJson>[],
+    totalCents: 0,
+  }));
+  const parCle = new Map(stages.map((s) => [s.cle, s]));
+  for (const r of rows) {
+    const cle = etapePipeline(r);
+    if (!cle) continue;
+    const s = parCle.get(cle);
+    if (!s) continue;
+    s.deals.push(documentToJson(r));
+    s.totalCents += r.total_cents;
+  }
+  return json({ stages: stages.map((s) => ({ ...s, count: s.deals.length })) });
+});
+
 // --- Passe 2 : soumissions web (endpoint public appelé par stamourduvert.com) ---
 
 const soumissionSchema = z.object({

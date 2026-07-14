@@ -27,14 +27,62 @@ interface Dashboard {
   repartitionForfaits: { name: string; clients: number }[];
 }
 
+interface EtapePipeline {
+  cle: string;
+  titre: string;
+  count: number;
+  totalCents: number;
+}
+
+const ACCENTS_ETAPE: Record<string, string> = {
+  estimation: "#8a6d3b",
+  contrat: "#2f6d9e",
+  facture: "#b06a1f",
+  paye: "#2e8255",
+  perdu: "#a33b2a",
+};
+
+function CarteStat({
+  label,
+  valeur,
+  to,
+  couleur,
+  sousTexte,
+}: {
+  label: string;
+  valeur: React.ReactNode;
+  to: string;
+  couleur?: string;
+  sousTexte?: React.ReactNode;
+}) {
+  return (
+    <Link className="panel stat stat-link" to={to}>
+      <div className="label">{label}</div>
+      <div className="value" style={couleur ? { color: couleur } : undefined}>
+        {valeur}
+      </div>
+      {sousTexte && <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{sousTexte}</div>}
+    </Link>
+  );
+}
+
 export default function TableauDeBord() {
   const [data, setData] = useState<Dashboard | null>(null);
+  const [pipeline, setPipeline] = useState<EtapePipeline[] | null>(null);
 
   useEffect(() => {
     api.get<Dashboard>("/api/dashboard").then(setData).catch(() => setData(null));
+    api
+      .get<{ stages: EtapePipeline[] }>("/api/pipeline")
+      .then((r) => setPipeline(r.stages))
+      .catch(() => setPipeline([]));
   }, []);
 
   if (!data) return <p>Chargement…</p>;
+
+  const maxPipeline = pipeline
+    ? Math.max(1, ...pipeline.map((s) => s.totalCents))
+    : 1;
 
   return (
     <>
@@ -49,40 +97,54 @@ export default function TableauDeBord() {
       </div>
 
       <div className="grid cols-3">
-        <div className="panel stat">
-          <div className="label">Clients actifs</div>
-          <div className="value">{data.clientsActifs}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Prospects</div>
-          <div className="value">{data.prospects}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Estimations en cours</div>
-          <div className="value">{data.estimationsEnCours}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Contrats actifs</div>
-          <div className="value">{data.contratsActifs}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Factures impayées</div>
-          <div className="value">{data.facturesImpayees}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Visites aujourd'hui</div>
-          <div className="value">{data.visitesAujourdhui}</div>
-        </div>
-        <div className="panel stat">
-          <div className="label">Marge du mois</div>
-          <div className="value" style={{ color: data.margeMoisCents < 0 ? "#a33b2a" : undefined }}>
-            {formatCad(data.margeMoisCents)}
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
-            Revenus {formatCad(data.revenusMoisCents)} − dépenses {formatCad(data.depensesMoisCents)}
-          </div>
-        </div>
+        <CarteStat label="Clients actifs" valeur={data.clientsActifs} to="/clients" />
+        <CarteStat label="Prospects" valeur={data.prospects} to="/clients" />
+        <CarteStat label="Estimations en cours" valeur={data.estimationsEnCours} to="/pipeline" />
+        <CarteStat label="Contrats actifs" valeur={data.contratsActifs} to="/pipeline" />
+        <CarteStat label="Factures impayées" valeur={data.facturesImpayees} to="/pipeline" />
+        <CarteStat label="Visites aujourd'hui" valeur={data.visitesAujourdhui} to="/calendrier" />
+        <CarteStat
+          label="Marge du mois"
+          valeur={formatCad(data.margeMoisCents)}
+          to="/finances"
+          couleur={data.margeMoisCents < 0 ? "#a33b2a" : undefined}
+          sousTexte={
+            <>
+              Revenus {formatCad(data.revenusMoisCents)} − dépenses {formatCad(data.depensesMoisCents)}
+            </>
+          }
+        />
       </div>
+
+      {pipeline && pipeline.length > 0 && (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2>
+            Pipeline de vente{" "}
+            <Link to="/pipeline" style={{ fontSize: 13, fontWeight: 500 }}>
+              Ouvrir →
+            </Link>
+          </h2>
+          <div className="funnel">
+            {pipeline.map((s) => (
+              <Link className="funnel-row" to="/pipeline" key={s.cle}>
+                <span className="funnel-label">{s.titre}</span>
+                <span className="funnel-track">
+                  <span
+                    className="funnel-fill"
+                    style={{
+                      width: `${Math.max(3, (s.totalCents / maxPipeline) * 100)}%`,
+                      background: ACCENTS_ETAPE[s.cle],
+                    }}
+                  />
+                </span>
+                <span className="funnel-meta">
+                  <strong>{s.count}</strong> · {formatCad(s.totalCents)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {data.soumissionsNouvelles.length > 0 && (
         <div className="panel" style={{ marginTop: 20 }}>

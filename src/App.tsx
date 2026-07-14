@@ -9,6 +9,7 @@ import FicheClient from "./pages/FicheClient";
 import Forfaits from "./pages/Forfaits";
 import Superficie from "./pages/Superficie";
 import Documents from "./pages/Documents";
+import Pipeline from "./pages/Pipeline";
 import NouveauDocument from "./pages/NouveauDocument";
 import DetailDocument from "./pages/DetailDocument";
 import Parametres from "./pages/Parametres";
@@ -26,6 +27,7 @@ const NAV = [
   { to: "/superficie", label: "Superficie", icon: "superficie" },
   { to: "/calendrier", label: "Calendrier & routes", icon: "calendrier" },
   { to: "/soumissions", label: "Soumissions web", icon: "soumissions" },
+  { to: "/pipeline", label: "Pipeline", icon: "pipeline" },
   { to: "/documents", label: "Estimations & factures", icon: "documents" },
   { to: "/inventaire", label: "Inventaire", icon: "inventaire" },
   { to: "/commandes", label: "Commandes", icon: "commandes" },
@@ -125,6 +127,7 @@ export default function App() {
           <Route path="/superficie" element={<Superficie />} />
           <Route path="/calendrier" element={<Calendrier />} />
           <Route path="/soumissions" element={<Soumissions />} />
+          <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/nouveau" element={<NouveauDocument />} />
           <Route path="/documents/:id/modifier" element={<NouveauDocument />} />

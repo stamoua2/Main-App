@@ -866,3 +866,108 @@ th.triable {
 th.triable:hover { color: var(--green-prairie, #2e8255); }
 th.triable .tri-fleche { opacity: 0.9; margin-left: 3px; font-size: 11px; }
 th.triable .tri-inactif { opacity: 0.28; }
+
+/* ---- Pipeline : tableau d'entonnoir du cycle de vente ---- */
+
+.pipeline-board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(240px, 1fr);
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  align-items: start;
+}
+.pipeline-col {
+  background: var(--panel, #fff);
+  border: 1px solid var(--border-2, #e7e3d8);
+  border-top: 3px solid var(--accent, #2e8255);
+  border-radius: 14px;
+  padding: 12px;
+  min-height: 120px;
+}
+.pipeline-col-head { margin-bottom: 10px; }
+.pipeline-col-titre {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--green-forest, #174a2d);
+}
+.pipeline-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent, #2e8255);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.pipeline-col-total { font-size: 12.5px; color: var(--muted, #4a5247); margin-top: 3px; font-weight: 600; }
+.pipeline-cards { display: flex; flex-direction: column; gap: 9px; }
+.pipeline-vide { color: var(--muted, #4a5247); font-size: 13px; font-style: italic; margin: 4px 2px; }
+.pipeline-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--cream, #faf8f3);
+  border: 1px solid var(--border-2, #e7e3d8);
+  border-radius: 10px;
+  padding: 10px 11px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.pipeline-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent, #2e8255);
+  box-shadow: 0 6px 16px rgba(23, 39, 31, 0.1);
+}
+.pipeline-card-haut { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.pipeline-num { font-weight: 700; font-size: 13px; color: var(--green-forest, #174a2d); }
+.pipeline-client { font-size: 13.5px; margin: 5px 0 7px; }
+.pipeline-card-bas { display: flex; justify-content: space-between; align-items: baseline; }
+.pipeline-date { font-size: 12px; color: var(--muted, #4a5247); }
+.pipeline-montant { font-weight: 700; font-size: 13.5px; }
+
+/* ---- Tableau de bord : cartes cliquables + entonnoir ---- */
+
+.stat-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.stat-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(23, 39, 31, 0.1);
+  border-color: var(--green-prairie, #2e8255);
+}
+
+.funnel { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.funnel-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+  padding: 3px 0;
+}
+.funnel-label { font-size: 13.5px; font-weight: 600; color: var(--green-forest, #174a2d); }
+.funnel-track {
+  height: 16px;
+  background: var(--green-pale-3, #f2f5ef);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.funnel-fill { display: block; height: 100%; border-radius: 8px; transition: width 0.4s ease; }
+.funnel-meta { font-size: 12.5px; color: var(--muted, #4a5247); white-space: nowrap; }
+.funnel-meta strong { color: var(--ink, #23271f); }
+@media (max-width: 600px) {
+  .funnel-row { grid-template-columns: 96px 1fr auto; gap: 8px; }
+  .funnel-label { font-size: 12px; }
+}
