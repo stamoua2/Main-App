@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api";
 import { formatCad, parseCadToCents } from "../../shared/money";
 import { classeStatut } from "../statut";
@@ -18,6 +19,7 @@ interface Depense {
   category: string;
   amountCents: number;
   spentOn: string;
+  supplierOrderId: number | null;
 }
 
 interface Revenu {
@@ -217,6 +219,11 @@ export default function Finances() {
                     <td>{d.spentOn}</td>
                     <td>
                       {d.label} <span className="chip muted plain">{d.category}</span>
+                      {d.supplierOrderId && (
+                        <Link to="/commandes" className="chip info" style={{ marginLeft: 6, textDecoration: "none" }}>
+                          Commande #{d.supplierOrderId}
+                        </Link>
+                      )}
                     </td>
                     <td className="num">{formatCad(d.amountCents)}</td>
                   </tr>

@@ -360,6 +360,13 @@ export const DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_package_items_pkg ON package_items(package_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_client ON visits(client_id)`,
 
+  // ---- Commandes fournisseurs comptabilisées en dépenses ----
+  // Chaque commande passée crée une dépense liée (catégorie « Fournisseurs »)
+  // pour que les marges reflètent le coût réel. La suppression de la commande
+  // retire la dépense (cascade).
+  `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS supplier_order_id INTEGER REFERENCES supplier_orders(id) ON DELETE CASCADE`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_order ON expenses(supplier_order_id) WHERE supplier_order_id IS NOT NULL`,
+
   // ---- Fiche client enrichie ----
   // Étiquettes libres (segments) séparées par des virgules; type d'activité
   // pour l'historique daté (note, appel, courriel, visite).

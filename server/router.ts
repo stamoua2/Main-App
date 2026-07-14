@@ -2254,6 +2254,43 @@ function orderTotals(
   return { tpsCents, tvqCents, totalCents: taxable + tpsCents + tvqCents };
 }
 
+// Synchronise la dépense liée à une commande fournisseur : crée/actualise une
+// dépense (catégorie « Fournisseurs ») reflétant le total de la commande, ou la
+// retire si la commande est annulée. Ainsi les marges tiennent compte du coût
+// réel des commandes passées. La suppression de la commande retire la dépense
+// automatiquement (ON DELETE CASCADE).
+async function syncOrderExpense(
+  db: Awaited<ReturnType<typeof getDb>>,
+  orderId: number,
+): Promise<void> {
+  const { rows } = await db.query<{
+    id: number; supplier: string; status: string; total_cents: number; ordered_on: string | null;
+  }>("SELECT id, supplier, status, total_cents, ordered_on FROM supplier_orders WHERE id = $1", [orderId]);
+  const o = rows[0];
+  if (!o) return;
+  const { rows: existing } = await db.query<{ id: number }>(
+    "SELECT id FROM expenses WHERE supplier_order_id = $1",
+    [orderId],
+  );
+  if (o.status === "annulée") {
+    if (existing[0]) await db.query("DELETE FROM expenses WHERE supplier_order_id = $1", [orderId]);
+    return;
+  }
+  const label = `Commande #${o.id} — ${o.supplier}`;
+  if (existing[0]) {
+    await db.query(
+      "UPDATE expenses SET label = $1, amount_cents = $2 WHERE supplier_order_id = $3",
+      [label, o.total_cents, orderId],
+    );
+  } else {
+    await db.query(
+      `INSERT INTO expenses (label, category, amount_cents, spent_on, notes, supplier_order_id)
+       VALUES ($1, 'Fournisseurs', $2, COALESCE($3::date, CURRENT_DATE), $4, $5)`,
+      [label, o.total_cents, o.ordered_on, "Générée automatiquement depuis la commande fournisseur.", orderId],
+    );
+  }
+}
+
 route("POST", "/api/orders", async (req) => {
   const parsed = orderSchema.safeParse(await body(req));
   if (!parsed.success) return error(parsed.error.issues[0].message, 400);
@@ -2274,6 +2311,8 @@ route("POST", "/api/orders", async (req) => {
       [rows[0].id, line.itemId ?? null, line.description, line.quantity, line.unitCostCents, Math.round(line.quantity * line.unitCostCents)],
     );
   }
+  // La commande passée est comptabilisée comme dépense (marges à jour).
+  await syncOrderExpense(db, rows[0].id);
   return json({ commande: { id: rows[0].id, totalCents: t.totalCents } }, 201);
 });
 
@@ -2309,6 +2348,8 @@ route("PUT", "/api/orders/:id", async (req, params) => {
     [d.supplier ?? null, d.status ?? null, d.notes ?? null, shipping, taxes,
      t.tpsCents, t.tvqCents, t.totalCents, Number(params.id)],
   );
+  // Répercute le nouveau total (ou l'annulation) sur la dépense liée.
+  await syncOrderExpense(db, Number(params.id));
   return json({ ok: true, totalCents: t.totalCents });
 });
 
@@ -2521,6 +2562,7 @@ route("GET", "/api/expenses", async () => {
     depenses: (rows as any[]).map((r) => ({
       id: r.id, label: r.label, category: r.category,
       amountCents: r.amount_cents, spentOn: toIsoDate(r.spent_on), notes: r.notes,
+      supplierOrderId: r.supplier_order_id ?? null,
     })),
   });
 });
@@ -2540,6 +2582,19 @@ route("POST", "/api/expenses", async (req) => {
 
 route("DELETE", "/api/expenses/:id", async (_req, params) => {
   const db = await getDb();
+  // Une dépense générée par une commande fournisseur se retire en supprimant ou
+  // en annulant la commande (pour éviter la désynchronisation).
+  const { rows: lien } = await db.query<{ supplier_order_id: number | null }>(
+    "SELECT supplier_order_id FROM expenses WHERE id = $1",
+    [Number(params.id)],
+  );
+  if (!lien.length) return error("Dépense introuvable.", 404);
+  if (lien[0].supplier_order_id != null) {
+    return error(
+      "Cette dépense provient d'une commande fournisseur : supprimez ou annulez la commande.",
+      409,
+    );
+  }
   const { rows } = await db.query("DELETE FROM expenses WHERE id = $1 RETURNING id", [Number(params.id)]);
   if (!rows.length) return error("Dépense introuvable.", 404);
   return json({ ok: true });

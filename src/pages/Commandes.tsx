@@ -198,6 +198,10 @@ export default function Commandes() {
         <div>
           <div className="eyebrow">Opérations</div>
           <h1>Commandes fournisseurs</h1>
+          <p className="field-hint" style={{ marginTop: 6 }}>
+            Chaque commande passée est comptabilisée comme dépense dans les Finances
+            (catégorie « Fournisseurs »). L'annuler ou la supprimer retire la dépense.
+          </p>
         </div>
         <button className="btn" onClick={() => setFormVisible((v) => !v)}>
           {formVisible ? "Fermer" : "+ Nouvelle commande"}
