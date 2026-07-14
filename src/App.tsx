@@ -10,6 +10,7 @@ import Forfaits from "./pages/Forfaits";
 import Superficie from "./pages/Superficie";
 import Documents from "./pages/Documents";
 import Pipeline from "./pages/Pipeline";
+import Taches from "./pages/Taches";
 import NouveauDocument from "./pages/NouveauDocument";
 import DetailDocument from "./pages/DetailDocument";
 import Parametres from "./pages/Parametres";
@@ -23,6 +24,7 @@ import Marketing from "./pages/Marketing";
 const NAV = [
   { to: "/", label: "Tableau de bord", icon: "tableau" },
   { to: "/clients", label: "Clients", icon: "clients" },
+  { to: "/taches", label: "Tâches", icon: "taches" },
   { to: "/forfaits", label: "Forfaits", icon: "forfaits" },
   { to: "/superficie", label: "Superficie", icon: "superficie" },
   { to: "/calendrier", label: "Calendrier & routes", icon: "calendrier" },
@@ -127,6 +129,7 @@ export default function App() {
           <Route path="/superficie" element={<Superficie />} />
           <Route path="/calendrier" element={<Calendrier />} />
           <Route path="/soumissions" element={<Soumissions />} />
+          <Route path="/taches" element={<Taches />} />
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/documents/nouveau" element={<NouveauDocument />} />

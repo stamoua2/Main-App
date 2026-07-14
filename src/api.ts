@@ -60,6 +60,20 @@ export interface Client {
   notes: string;
 }
 
+export interface Tache {
+  id: number;
+  title: string;
+  notes: string;
+  dueOn: string | null;
+  done: boolean;
+  priority: "basse" | "normale" | "haute";
+  clientId: number | null;
+  clientName: string | null;
+  documentId: number | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
 export interface Forfait {
   id: number;
   slug: string;

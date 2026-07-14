@@ -360,5 +360,24 @@ export const DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_package_items_pkg ON package_items(package_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_client ON visits(client_id)`,
 
+  // ---- Tâches & relances ----
+  // Rappels de suivi (relancer une estimation, appeler un client, planifier un
+  // service). Peut être rattachée à un client et/ou à un document. « due_on »
+  // porte l'échéance; « done » marque l'achèvement.
+  `CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    due_on DATE,
+    done BOOLEAN NOT NULL DEFAULT false,
+    priority TEXT NOT NULL DEFAULT 'normale',
+    client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+    document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_on)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks(client_id)`,
+
   `INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
 ];

@@ -90,6 +90,12 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
     </>
   ),
+  taches: (
+    <>
+      <path d="M11 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+      <path d="m9 11 3 3L22 4" />
+    </>
+  ),
   pipeline: (
     <>
       <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />

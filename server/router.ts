@@ -1363,6 +1363,19 @@ route("GET", "/api/dashboard", async () => {
   const { rows: todaysVisits } = await db.query<{ n: string }>(
     "SELECT count(*) AS n FROM visits WHERE scheduled_at::date = CURRENT_DATE AND status != 'annulee'",
   );
+  const tachesEnRetard = await count(
+    "SELECT count(*) AS n FROM tasks WHERE NOT done AND due_on IS NOT NULL AND due_on < CURRENT_DATE",
+  );
+  const tachesAujourdhui = await count(
+    "SELECT count(*) AS n FROM tasks WHERE NOT done AND due_on = CURRENT_DATE",
+  );
+  const { rows: prochainesTaches } = await db.query<TaskRow>(
+    `SELECT t.*, (c.first_name || ' ' || c.last_name) AS client_name
+     FROM tasks t LEFT JOIN clients c ON c.id = t.client_id
+     WHERE NOT t.done
+     ORDER BY t.due_on IS NULL, t.due_on, t.id
+     LIMIT 6`,
+  );
   // Marge du mois courant : revenus (factures payées + revenus manuels) − dépenses.
   const sumMonth = async (sql: string) =>
     Number((await db.query<{ s: string | null }>(sql)).rows[0].s ?? 0);
@@ -1390,6 +1403,9 @@ route("GET", "/api/dashboard", async () => {
     contratsActifs,
     facturesImpayees,
     visitesAujourdhui: Number(todaysVisits[0].n),
+    tachesEnRetard,
+    tachesAujourdhui,
+    prochainesTaches: prochainesTaches.map(taskToJson),
     notificationsNonLues: Number(unread[0].n),
     soumissionsNouvelles: leadRows.map(leadToJson),
     documentsRecents: recents.map((r) => documentToJson(r)),
@@ -2283,6 +2299,141 @@ const revenueSchema = z.object({
   amountCents: z.number().int().min(1, "Montant requis"),
   receivedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   notes: z.string().default(""),
+});
+
+// ---- Tâches & relances ----
+
+const taskSchema = z.object({
+  title: z.string().min(1, "Titre requis").max(300),
+  notes: z.string().max(4000).default(""),
+  dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date invalide").nullish(),
+  priority: z.enum(["basse", "normale", "haute"]).default("normale"),
+  clientId: z.number().int().nullish(),
+  documentId: z.number().int().nullish(),
+});
+
+const taskUpdateSchema = z.object({
+  title: z.string().min(1).max(300).optional(),
+  notes: z.string().max(4000).optional(),
+  dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  priority: z.enum(["basse", "normale", "haute"]).optional(),
+  done: z.boolean().optional(),
+});
+
+interface TaskRow {
+  id: number;
+  title: string;
+  notes: string;
+  due_on: string | null;
+  done: boolean;
+  priority: string;
+  client_id: number | null;
+  document_id: number | null;
+  completed_at: string | null;
+  created_at: string;
+  client_name?: string | null;
+}
+
+function taskToJson(r: TaskRow) {
+  return {
+    id: r.id,
+    title: r.title,
+    notes: r.notes,
+    dueOn: r.due_on ? toIsoDate(r.due_on) : null,
+    done: r.done,
+    priority: r.priority,
+    clientId: r.client_id,
+    clientName: r.client_name ?? null,
+    documentId: r.document_id,
+    completedAt: r.completed_at,
+    createdAt: r.created_at,
+  };
+}
+
+// Liste des tâches. `scope` : "ouvertes" (défaut, non faites), "terminees",
+// "toutes". `clientId` filtre sur un client. Tri : échéance croissante d'abord
+// (les tâches sans date passent en dernier), puis id.
+route("GET", "/api/tasks", async (req) => {
+  const db = await getDb();
+  const url = new URL(req.url);
+  const scope = url.searchParams.get("scope") ?? "ouvertes";
+  const clientId = url.searchParams.get("clientId");
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (scope === "ouvertes") conditions.push("NOT t.done");
+  else if (scope === "terminees") conditions.push("t.done");
+  if (clientId) {
+    params.push(Number(clientId));
+    conditions.push(`t.client_id = $${params.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const { rows } = await db.query<TaskRow>(
+    `SELECT t.*, (c.first_name || ' ' || c.last_name) AS client_name
+     FROM tasks t LEFT JOIN clients c ON c.id = t.client_id
+     ${where}
+     ORDER BY t.done, t.due_on IS NULL, t.due_on, t.id
+     LIMIT 500`,
+    params,
+  );
+  return json({ taches: rows.map(taskToJson) });
+});
+
+route("POST", "/api/tasks", async (req) => {
+  const parsed = taskSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const db = await getDb();
+  const { rows: inserted } = await db.query<{ id: number }>(
+    `INSERT INTO tasks (title, notes, due_on, priority, client_id, document_id)
+     VALUES ($1,$2,$3::date,$4,$5,$6) RETURNING id`,
+    [d.title, d.notes, d.dueOn ?? null, d.priority, d.clientId ?? null, d.documentId ?? null],
+  );
+  const { rows } = await db.query<TaskRow>(
+    `SELECT t.*, (c.first_name || ' ' || c.last_name) AS client_name
+     FROM tasks t LEFT JOIN clients c ON c.id = t.client_id WHERE t.id = $1`,
+    [inserted[0].id],
+  );
+  return json({ tache: taskToJson(rows[0]) }, 201);
+});
+
+route("PUT", "/api/tasks/:id", async (req, params) => {
+  const parsed = taskUpdateSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const d = parsed.data;
+  const id = Number(params.id);
+  const db = await getDb();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  const set = (col: string, val: unknown) => {
+    values.push(val);
+    sets.push(`${col} = $${values.length}`);
+  };
+  if (d.title !== undefined) set("title", d.title);
+  if (d.notes !== undefined) set("notes", d.notes);
+  if (d.dueOn !== undefined) {
+    values.push(d.dueOn);
+    sets.push(`due_on = $${values.length}::date`);
+  }
+  if (d.priority !== undefined) set("priority", d.priority);
+  if (d.done !== undefined) {
+    set("done", d.done);
+    sets.push(`completed_at = ${d.done ? "now()" : "NULL"}`);
+  }
+  if (!sets.length) return error("Aucun champ à modifier.", 400);
+  values.push(id);
+  const { rows } = await db.query<TaskRow>(
+    `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (!rows.length) return error("Tâche introuvable.", 404);
+  return json({ tache: taskToJson(rows[0]) });
+});
+
+route("DELETE", "/api/tasks/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM tasks WHERE id = $1 RETURNING id", [Number(params.id)]);
+  if (!rows.length) return error("Tâche introuvable.", 404);
+  return json({ ok: true });
 });
 
 route("GET", "/api/expenses", async () => {

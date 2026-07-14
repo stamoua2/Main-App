@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type DocumentFacturation } from "../api";
+import { api, type DocumentFacturation, type Tache } from "../api";
 import { formatCad } from "../../shared/money";
 import { classeStatut } from "../statut";
 
@@ -11,6 +11,9 @@ interface Dashboard {
   contratsActifs: number;
   facturesImpayees: number;
   visitesAujourdhui: number;
+  tachesEnRetard: number;
+  tachesAujourdhui: number;
+  prochainesTaches: Tache[];
   notificationsNonLues: number;
   margeMoisCents: number;
   revenusMoisCents: number;
@@ -96,6 +99,23 @@ export default function TableauDeBord() {
         </Link>
       </div>
 
+      {data.tachesEnRetard > 0 && (
+        <Link to="/taches" className="alert-relance">
+          <span className="alert-ico">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 9v4" />
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <path d="M12 17h.01" />
+            </svg>
+          </span>
+          <strong>
+            {data.tachesEnRetard} relance{data.tachesEnRetard > 1 ? "s" : ""} en retard
+          </strong>
+          {data.tachesAujourdhui > 0 && <span> · {data.tachesAujourdhui} à faire aujourd'hui</span>}
+          <span className="alert-fleche">Voir →</span>
+        </Link>
+      )}
+
       <div className="grid cols-3">
         <CarteStat label="Clients actifs" valeur={data.clientsActifs} to="/clients" />
         <CarteStat label="Prospects" valeur={data.prospects} to="/clients" />
@@ -143,6 +163,43 @@ export default function TableauDeBord() {
               </Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {data.prochainesTaches.length > 0 && (
+        <div className="panel" style={{ marginTop: 20 }}>
+          <h2>
+            Relances à venir{" "}
+            <Link to="/taches" style={{ fontSize: 13, fontWeight: 500 }}>
+              Toutes les tâches →
+            </Link>
+          </h2>
+          <ul className="relance-list">
+            {data.prochainesTaches.map((t) => {
+              const auj = new Date().toISOString().slice(0, 10);
+              const classe =
+                t.dueOn && t.dueOn < auj
+                  ? "chip danger"
+                  : t.dueOn === auj
+                    ? "chip warn"
+                    : t.dueOn
+                      ? "chip info"
+                      : "chip";
+              return (
+                <li key={t.id}>
+                  <span className={classe}>
+                    {t.dueOn ? (t.dueOn < auj ? `En retard · ${t.dueOn}` : t.dueOn === auj ? "Aujourd'hui" : t.dueOn) : "Sans date"}
+                  </span>
+                  <span className="relance-titre">{t.title}</span>
+                  {t.clientName && (
+                    <Link to={`/clients/${t.clientId}`} style={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {t.clientName}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 
