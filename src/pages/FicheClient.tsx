@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, ApiError, type Client, type DocumentFacturation, type Forfait } from "../api";
 import { m2ToFt2 } from "../../shared/area";
 import { formatCad } from "../../shared/money";
 import { FormClient } from "./Clients";
 import { classeStatut } from "../statut";
 import { Retour } from "../components/Retour";
+import { useFeedback } from "../components/Feedback";
 
 export default function FicheClient() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const { toast, confirmer } = useFeedback();
   const [client, setClient] = useState<Client | null>(null);
   const [forfaits, setForfaits] = useState<Forfait[]>([]);
   const [documents, setDocuments] = useState<DocumentFacturation[]>([]);
-  const [edition, setEdition] = useState(false);
+  const [edition, setEdition] = useState(params.get("edit") === "1");
   const [erreur, setErreur] = useState("");
 
   async function charger() {
@@ -31,12 +34,19 @@ export default function FicheClient() {
 
   async function supprimer() {
     if (!client) return;
-    if (!window.confirm(`Supprimer définitivement ${client.fullName} ?`)) return;
+    const ok = await confirmer({
+      titre: `Supprimer ${client.fullName} ?`,
+      message: "Cette action est définitive. Un client rattaché à des documents ne peut pas être supprimé.",
+      confirmer: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/clients/${client.id}`);
+      toast(`${client.fullName} supprimé.`);
       navigate("/clients");
     } catch (err) {
-      setErreur(err instanceof ApiError ? err.message : "Suppression impossible.");
+      toast(err instanceof ApiError ? err.message : "Suppression impossible.", "error");
     }
   }
 
@@ -85,6 +95,7 @@ export default function FicheClient() {
             onSauvegarde={async (data) => {
               await api.put(`/api/clients/${client.id}`, data);
               setEdition(false);
+              toast("Client mis à jour.");
               await charger();
             }}
             onAnnule={() => setEdition(false)}

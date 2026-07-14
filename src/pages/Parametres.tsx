@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type Parametres as ParametresType, type Utilisateur } from "../api";
 import ChampMotDePasse from "../components/ChampMotDePasse";
+import { useFeedback } from "../components/Feedback";
 
 export default function Parametres() {
   const [parametres, setParametres] = useState<ParametresType | null>(null);
@@ -11,6 +12,8 @@ export default function Parametres() {
   const [nouvelUtilisateur, setNouvelUtilisateur] = useState({ name: "", username: "", email: "", password: "" });
   const [messageUtil, setMessageUtil] = useState("");
   const [erreurUtil, setErreurUtil] = useState("");
+  const [moiId, setMoiId] = useState<number | null>(null);
+  const { toast, confirmer } = useFeedback();
   const [edition, setEdition] = useState<{
     id: number;
     name: string;
@@ -26,8 +29,27 @@ export default function Parametres() {
 
   useEffect(() => {
     api.get<{ parametres: ParametresType }>("/api/settings").then((r) => setParametres(r.parametres));
+    api.get<{ utilisateur: Utilisateur }>("/api/auth/me").then((r) => setMoiId(r.utilisateur.id));
     chargerUtilisateurs();
   }, []);
+
+  async function supprimerUtilisateur(u: Utilisateur) {
+    const ok = await confirmer({
+      titre: `Supprimer le compte de ${u.name} ?`,
+      message: `Le compte « ${u.username} » sera définitivement supprimé.`,
+      confirmer: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/api/users/${u.id}`);
+      toast(`Compte de ${u.name} supprimé.`);
+      if (edition?.id === u.id) setEdition(null);
+      await chargerUtilisateurs();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "Erreur lors de la suppression.", "error");
+    }
+  }
 
   async function sauvegarderUtilisateur(e: FormEvent) {
     e.preventDefault();
@@ -207,20 +229,27 @@ export default function Parametres() {
                   <span className="chip plain">{u.role}</span>
                 </td>
                 <td>
-                  <button
-                    className="btn secondary small"
-                    onClick={() =>
-                      setEdition({
-                        id: u.id,
-                        name: u.name,
-                        username: u.username,
-                        email: u.email,
-                        password: "",
-                      })
-                    }
-                  >
-                    Modifier
-                  </button>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button
+                      className="btn secondary small"
+                      onClick={() =>
+                        setEdition({
+                          id: u.id,
+                          name: u.name,
+                          username: u.username,
+                          email: u.email,
+                          password: "",
+                        })
+                      }
+                    >
+                      Modifier
+                    </button>
+                    {u.id !== moiId && (
+                      <button className="btn danger small" onClick={() => supprimerUtilisateur(u)}>
+                        Supprimer
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

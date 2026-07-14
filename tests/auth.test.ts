@@ -113,6 +113,31 @@ describe("authentification", () => {
     expect(res.status).toBe(409);
   });
 
+  it("empêche un utilisateur de supprimer son propre compte", async () => {
+    const cookie = await login(ALEX.email, ALEX.password);
+    const me = await api("GET", "/api/auth/me", { cookie });
+    const res = await api("DELETE", `/api/users/${me.body.utilisateur.id}`, { cookie });
+    expect(res.status).toBe(400);
+  });
+
+  it("supprime un autre utilisateur, qui ne peut plus se connecter", async () => {
+    const cookie = await login(ALEX.email, ALEX.password);
+    const users = await api("GET", "/api/users", { cookie });
+    const cindy = users.body.utilisateurs.find((u: any) => u.username === "cindy.sa");
+
+    const res = await api("DELETE", `/api/users/${cindy.id}`, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.supprime).toBe(cindy.id);
+
+    // Le compte n'apparaît plus et ne permet plus la connexion.
+    const apres = await api("GET", "/api/users", { cookie });
+    expect(apres.body.utilisateurs.some((u: any) => u.id === cindy.id)).toBe(false);
+    const relog = await api("POST", "/api/auth/login", {
+      body: { identifiant: "cindy.sa", password: "NouveauMotDePasse123!" },
+    });
+    expect(relog.status).toBe(401);
+  });
+
   it("la déconnexion invalide le cookie", async () => {
     const res = await api("POST", "/api/auth/logout");
     const cleared = res.headers.get("set-cookie") ?? "";

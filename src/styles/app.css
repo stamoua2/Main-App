@@ -770,3 +770,99 @@ label.field.check { flex-direction: row; align-items: center; gap: 9px; }
   .map-canvas { height: 380px; }
   .data select { max-width: 200px; }
 }
+
+/* ---- Fini UX : toasts, modale de confirmation, skeletons, tri ---- */
+
+.toast-pile {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 36px));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border-2, #e7e3d8);
+  box-shadow: 0 10px 30px rgba(23, 39, 31, 0.16);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink, #23271f);
+  animation: toast-in 0.22s ease;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-ico { display: inline-flex; flex-shrink: 0; }
+.toast.success { border-left: 4px solid var(--green-prairie, #2e8255); }
+.toast.success .toast-ico { color: var(--green-prairie, #2e8255); }
+.toast.error { border-left: 4px solid #a33b2a; }
+.toast.error .toast-ico { color: #a33b2a; }
+.toast.info { border-left: 4px solid #2f6d9e; }
+.toast.info .toast-ico { color: #2f6d9e; }
+.toast-x {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted, #4a5247);
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 6px;
+}
+.toast-x:hover { background: var(--green-pale-3, #f2f5ef); color: var(--ink); }
+
+.modal-fond {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(23, 39, 31, 0.4);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: toast-in 0.16s ease;
+}
+.modal-boite {
+  background: #fff;
+  border-radius: 16px;
+  padding: 22px 24px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 24px 60px rgba(23, 39, 31, 0.28);
+}
+.modal-boite h3 { font-size: 18px; margin-bottom: 8px; }
+.modal-boite p { color: var(--muted, #4a5247); font-size: 14px; margin: 0 0 4px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+.skeleton-bar {
+  display: inline-block;
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #ece8de 25%, #f6f3ec 50%, #ece8de 75%);
+  background-size: 200% 100%;
+  animation: skeleton-glow 1.3s ease infinite;
+}
+.skeleton-table td { padding: 12px 14px; }
+@keyframes skeleton-glow {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+th.triable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th.triable:hover { color: var(--green-prairie, #2e8255); }
+th.triable .tri-fleche { opacity: 0.9; margin-left: 3px; font-size: 11px; }
+th.triable .tri-inactif { opacity: 0.28; }
