@@ -1030,3 +1030,39 @@ th.triable .tri-inactif { opacity: 0.28; }
 .alert-relance .alert-ico { display: inline-flex; color: #b8401f; }
 .alert-relance .alert-fleche { margin-left: auto; font-weight: 600; white-space: nowrap; }
 .alert-relance:hover { border-color: #b8401f; }
+
+/* ---- Fiche client enrichie : étiquettes + historique d'activité ---- */
+
+.tag-rangee { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tag-puce {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--green-pale-3, #f2f5ef);
+  color: var(--green-forest, #174a2d);
+  border: 1px solid var(--border-2, #e7e3d8);
+}
+.tag-puce.type-appel { background: #eaf2fb; color: #2f6d9e; border-color: #d3e3f3; }
+.tag-puce.type-courriel { background: #f3eefb; color: #6a4b9e; border-color: #e2d6f3; }
+.tag-puce.type-visite { background: #fdf3e8; color: #b06a1f; border-color: #f3e0c9; }
+
+.activite-list { list-style: none; margin: 0; padding: 0; }
+.activite-item { padding: 10px 0; border-bottom: 1px solid var(--border-2, #e7e3d8); }
+.activite-item:last-child { border-bottom: none; }
+.activite-entete { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+.activite-date { font-size: 12px; color: var(--muted, #4a5247); }
+.activite-corps { font-size: 14px; white-space: pre-wrap; }
+.activite-auteur { font-size: 12px; color: var(--muted, #4a5247); margin-top: 3px; }
+.lien-supprimer {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #a33b2a;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+.lien-supprimer:hover { text-decoration: underline; }

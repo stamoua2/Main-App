@@ -97,6 +97,7 @@ const clientSchema = z.object({
   packageId: z.number().int().nullable().optional(),
   status: z.enum(["prospect", "actif", "inactif"]).default("actif"),
   notes: z.string().default(""),
+  tags: z.array(z.string().max(40)).max(20).optional(),
 });
 
 const documentLineSchema = z.object({
@@ -160,9 +161,19 @@ interface ClientRow {
   package_id: number | null;
   status: string;
   notes: string;
+  tags: string;
   created_at: string;
   updated_at: string;
   package_name?: string | null;
+  last_contact?: string | null;
+}
+
+// Étiquettes : stockées en une chaîne « a,b,c », exposées en tableau propre.
+function tagsToArray(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 function clientToJson(row: ClientRow) {
@@ -184,6 +195,8 @@ function clientToJson(row: ClientRow) {
     packageName: row.package_name ?? null,
     status: row.status,
     notes: row.notes,
+    tags: tagsToArray(row.tags),
+    lastContactOn: row.last_contact ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -770,7 +783,8 @@ route("GET", "/api/services", async () => {
 
 // --- Clients ---
 
-const CLIENT_SELECT = `SELECT c.*, p.name AS package_name
+const CLIENT_SELECT = `SELECT c.*, p.name AS package_name,
+    (SELECT max(f.created_at) FROM client_followups f WHERE f.client_id = c.id) AS last_contact
   FROM clients c LEFT JOIN packages p ON p.id = c.package_id`;
 
 route("GET", "/api/clients", async (req) => {
@@ -804,12 +818,12 @@ route("POST", "/api/clients", async (req) => {
   const db = await getDb();
   const { rows } = await db.query<{ id: number }>(
     `INSERT INTO clients (first_name, last_name, email, phone, address_line, city, province,
-       postal_code, latitude, longitude, lot_area_m2, package_id, status, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+       postal_code, latitude, longitude, lot_area_m2, package_id, status, notes, tags)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
     [
       d.firstName, d.lastName, d.email, d.phone, d.addressLine, d.city, d.province,
       d.postalCode, d.latitude ?? null, d.longitude ?? null, d.lotAreaM2 ?? null,
-      d.packageId ?? null, d.status, d.notes,
+      d.packageId ?? null, d.status, d.notes, (d.tags ?? []).join(","),
     ],
   );
   const { rows: created } = await db.query<ClientRow>(`${CLIENT_SELECT} WHERE c.id = $1`, [rows[0].id]);
@@ -831,6 +845,7 @@ route("PUT", "/api/clients/:id", async (req, params) => {
     ["latitude", d.latitude], ["longitude", d.longitude],
     ["lot_area_m2", d.lotAreaM2], ["package_id", d.packageId],
     ["status", d.status], ["notes", d.notes],
+    ["tags", d.tags !== undefined ? d.tags.join(",") : undefined],
   ];
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -861,6 +876,69 @@ route("DELETE", "/api/clients/:id", async (_req, params) => {
   const { rows } = await db.query("DELETE FROM clients WHERE id = $1 RETURNING id", [id]);
   if (!rows.length) return error("Client introuvable.", 404);
   return json({ ok: true, supprime: id });
+});
+
+// --- Historique d'activité du client (appels, courriels, notes datées) ---
+
+const followupSchema = z.object({
+  body: z.string().min(1, "Note requise").max(4000),
+  kind: z.enum(["note", "appel", "courriel", "visite"]).default("note"),
+});
+
+interface FollowupRow {
+  id: number;
+  client_id: number;
+  body: string;
+  kind: string;
+  created_by: number | null;
+  created_at: string;
+  author_name?: string | null;
+}
+
+function followupToJson(r: FollowupRow) {
+  return {
+    id: r.id,
+    clientId: r.client_id,
+    body: r.body,
+    kind: r.kind,
+    authorName: r.author_name ?? null,
+    createdAt: r.created_at,
+  };
+}
+
+route("GET", "/api/clients/:id/followups", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query<FollowupRow>(
+    `SELECT f.*, u.name AS author_name
+     FROM client_followups f LEFT JOIN users u ON u.id = f.created_by
+     WHERE f.client_id = $1 ORDER BY f.created_at DESC, f.id DESC`,
+    [Number(params.id)],
+  );
+  return json({ activites: rows.map(followupToJson) });
+});
+
+route("POST", "/api/clients/:id/followups", async (req, params, user) => {
+  const parsed = followupSchema.safeParse(await body(req));
+  if (!parsed.success) return error(parsed.error.issues[0].message, 400);
+  const db = await getDb();
+  const clientId = Number(params.id);
+  const { rows: exists } = await db.query("SELECT id FROM clients WHERE id = $1", [clientId]);
+  if (!exists.length) return error("Client introuvable.", 404);
+  const { rows } = await db.query<FollowupRow>(
+    `INSERT INTO client_followups (client_id, body, kind, created_by)
+     VALUES ($1,$2,$3,$4) RETURNING *`,
+    [clientId, parsed.data.body, parsed.data.kind, user.id],
+  );
+  return json({ activite: followupToJson({ ...rows[0], author_name: user.name }) }, 201);
+});
+
+route("DELETE", "/api/followups/:id", async (_req, params) => {
+  const db = await getDb();
+  const { rows } = await db.query("DELETE FROM client_followups WHERE id = $1 RETURNING id", [
+    Number(params.id),
+  ]);
+  if (!rows.length) return error("Activité introuvable.", 404);
+  return json({ ok: true });
 });
 
 // --- Estimations / Factures ---

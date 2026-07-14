@@ -58,6 +58,17 @@ export interface Client {
   packageName: string | null;
   status: string;
   notes: string;
+  tags: string[];
+  lastContactOn: string | null;
+}
+
+export interface Activite {
+  id: number;
+  clientId: number;
+  body: string;
+  kind: "note" | "appel" | "courriel" | "visite";
+  authorName: string | null;
+  createdAt: string;
 }
 
 export interface Tache {

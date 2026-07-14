@@ -20,6 +20,7 @@ const CLIENT_VIDE = {
   notes: "",
   packageId: null as number | null,
   lotAreaM2: null as number | null,
+  tags: [] as string[],
 };
 
 export type FormulaireClient = typeof CLIENT_VIDE;
@@ -40,6 +41,7 @@ export function FormClient({
   const [superficiePi2, setSuperficiePi2] = useState(
     initial.lotAreaM2 ? String(Math.round(m2ToFt2(initial.lotAreaM2))) : "",
   );
+  const [tagsTexte, setTagsTexte] = useState((initial.tags ?? []).join(", "));
   const [erreur, setErreur] = useState("");
   const [enCours, setEnCours] = useState(false);
 
@@ -51,6 +53,17 @@ export function FormClient({
     setSuperficiePi2(valeur);
     const pi2 = Number(valeur.replace(/[^\d.,]/g, "").replace(",", "."));
     champ("lotAreaM2", valeur.trim() && pi2 > 0 ? Math.round(ft2ToM2(pi2) * 100) / 100 : null);
+  }
+
+  function changerTags(valeur: string) {
+    setTagsTexte(valeur);
+    champ(
+      "tags",
+      valeur
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    );
   }
 
   async function soumettre(e: FormEvent) {
@@ -137,6 +150,15 @@ export function FormClient({
             placeholder="Ex. : 5 000"
           />
           <span className="field-hint">Saisie manuelle. Ou mesurez-la sur la carte (page Superficie).</span>
+        </label>
+        <label className="field" style={{ gridColumn: "1 / -1" }}>
+          Étiquettes
+          <input
+            value={tagsTexte}
+            onChange={(e) => changerTags(e.target.value)}
+            placeholder="Ex. : VIP, Résidentiel, Buckingham"
+          />
+          <span className="field-hint">Séparées par des virgules. Servent à segmenter la clientèle.</span>
         </label>
         <label className="field" style={{ gridColumn: "1 / -1" }}>
           Notes
@@ -322,6 +344,15 @@ export default function Clients() {
                   <tr key={c.id}>
                     <td>
                       <Link to={`/clients/${c.id}`}>{c.fullName}</Link>
+                      {c.tags && c.tags.length > 0 && (
+                        <div className="tag-rangee" style={{ marginTop: 4 }}>
+                          {c.tags.slice(0, 3).map((t) => (
+                            <span key={t} className="tag-puce" style={{ fontSize: 11, padding: "1px 8px" }}>
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td>
                       {c.addressLine}, {c.city}

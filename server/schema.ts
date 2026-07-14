@@ -360,6 +360,13 @@ export const DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_package_items_pkg ON package_items(package_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_client ON visits(client_id)`,
 
+  // ---- Fiche client enrichie ----
+  // Étiquettes libres (segments) séparées par des virgules; type d'activité
+  // pour l'historique daté (note, appel, courriel, visite).
+  `ALTER TABLE clients ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE client_followups ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'note'`,
+  `CREATE INDEX IF NOT EXISTS idx_client_followups_client ON client_followups(client_id)`,
+
   // ---- Tâches & relances ----
   // Rappels de suivi (relancer une estimation, appeler un client, planifier un
   // service). Peut être rattachée à un client et/ou à un document. « due_on »
