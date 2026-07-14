@@ -208,10 +208,37 @@ routeur. Aucun framework serveur : un routeur maison à base de `RegExp`.
     de bouton de synchro manuel**; seul « Réessayer l'envoi Square » apparaît si
     l'envoi auto a échoué. **Parcours** clarifié (Estimation → Contrat → Facture
     → Payé) avec liens `related` (route `GET /api/documents/:id` enrichie).
-- **Tests** : suite à 115 tests, 100 % verte.
+- **Passe 7 (navigation + flux documents + calendrier↔contrats + Square auto + superficie)** :
+  - **Navigation** : lien « ← Retour » cohérent (`src/components/Retour.tsx`,
+    style `.retour-lien`) au-dessus du titre des pages de détail/édition
+    (document, fiche client, nouveau document).
+  - **Flux documents** : une fois l'estimation traitée (acceptée/refusée ou
+    ayant déjà un contrat/une facture liée), les boutons « Accepter / Convertir /
+    Refuser » disparaissent (fini les doublons) et le parcours renvoie vers le
+    document suivant; action principale du dossier mise en avant; textes
+    d'étape clarifiés. Une nouvelle estimation reste bien en « brouillon ».
+  - **Calendrier ↔ contrats** : supprimer un document retire aussi ses visites
+    (`DELETE FROM visits WHERE document_id`) — plus de planifications orphelines.
+  - **Contrat créable directement** : nouveau type « Contrat » dans le formulaire
+    → `insertDocument` génère les visites de saison ET envoie vers Square (comme
+    la facture); l'estimation reste locale.
+  - **Superficie manuelle** : champ pi² éditable dans le formulaire client
+    (`FormClient`, conversion pi²↔m² à l'interne), en plus de la mesure sur carte.
+  - **Numéros uniques** : compteur persistant `document_counters` (jamais
+    décrémenté) → un numéro supprimé n'est jamais réémis; `square_send_count` →
+    invoice_number Square suffixé « -R2 »… à chaque ré-envoi.
+- **Tests** : suite à 119 tests, 100 % verte.
 
 ## Journal — pièges résolus (ne pas refaire les mêmes erreurs)
 
+- **Numéro Square « invoice number already used »** : Square conserve un
+  `invoice_number` **même après annulation**. Or l'ancienne numérotation
+  « max + 1 » sur les documents **existants** réémettait le numéro d'un document
+  supprimé → collision au prochain envoi. Corrigé par (1) un **compteur
+  persistant** `document_counters` (par préfixe/année, jamais décrémenté) pour la
+  numérotation locale et (2) `square_send_count` qui **suffixe** l'`invoice_number`
+  (« -R2 »…) à chaque envoi, **persisté AVANT l'appel** pour qu'un « Réessayer »
+  après échec obtienne toujours un numéro neuf.
 - La BD Netlify est exposée sous **`NETLIFY_DB_URL`** (pas `DATABASE_URL`) —
   `db.ts` teste les trois noms. Symptôme initial : `DbNotProvisionedError`.
 - Driver Neon : appeler **`sql(text, params)`**, pas `sql.query()`.
