@@ -31,6 +31,29 @@ Alexandre St-Amour (astamour8@gmail.com). Dépôt distinct du site vitrine
   confirmation** avant de committer — pour éviter d'y inscrire une information
   erronée. Mettre à jour le journal ci-dessous au fil des passes (avec accord).
 
+## Refonte visuelle via Claude Design (workflow)
+
+Le propriétaire conçoit le **visuel et l'UI dans l'outil Claude Design**
+(design system + écrans, comme un designer de site web), puis transmet une
+**nouvelle version** sous forme de handoff (`.zip`, fichiers, ou lien de
+partage). Message type : « **Voici la nouvelle version, mets-la en ligne.** »
+
+- **Rôle de Claude Code** : reconstruire les écrans dans le vrai code (React +
+  Vite + TypeScript) et les brancher aux vraies données — **ne jamais copier
+  les fichiers de design tels quels**, ce sont des références visuelles.
+- **Visuel d'abord, jamais à l'aveugle** : montrer une **capture/aperçu par
+  écran AVANT de déployer**, attendre l'approbation du propriétaire, puis
+  déployer en **un seul build**.
+- **Fidélité à l'identité** : vert forêt `#174A2D`, prairie `#2E8255`, foncé
+  `#0F3A22`, terracotta `#B5582E` (accent rare), crème `#FAF8F3` ; polices
+  **Bricolage Grotesque** (titres/chiffres) + **Hanken Grotesk** (corps) ;
+  icônes au trait (jamais d'émoji) ; **responsive jusqu'à 390 px**, menu
+  hamburger < 900 px ; superficies en **pi²**, argent en **CAD**.
+- **Sécurité avant toute refonte en prod** : garder un point de retour —
+  branche de sauvegarde de la prod actuelle + republication possible de
+  l'ancien déploiement Netlify. **Migrations de schéma additives seulement.**
+- Brief de référence complet : `docs/design-brief.md`.
+
 ## Comptes de connexion (application)
 
 > ⚠️ Ces mots de passe sont en clair et se retrouvent dans l'historique Git.
